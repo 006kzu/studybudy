@@ -38,7 +38,7 @@ export default function WienerAvatar({ points, inventory = [], equippedAvatar = 
                 zIndex: 3,
                 fontFamily: 'var(--font-primary)'
             }}>
-                {points} in
+                {points} Coins 💰
             </div>
         </div>
     );

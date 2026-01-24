@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import WienerAvatar from '@/components/WienerAvatar';
+import Modal from '@/components/Modal';
 
 export default function Dashboard() {
     const { state, removeClass } = useApp();
@@ -113,7 +114,7 @@ export default function Dashboard() {
 
                                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', paddingRight: '24px' }}>
                                     <h3 style={{ fontSize: '1.2rem', fontWeight: 600 }}>{cls.name}</h3>
-                                    <span style={{ color: 'var(--color-text-secondary)' }}>{Math.round(progress / 60)} / {goal / 60} hrs</span>
+                                    <span style={{ color: 'var(--color-text-secondary)' }}>{Math.round(progress)} / {goal} mins</span>
                                 </div>
 
                                 {/* Progress Bar */}
@@ -138,7 +139,7 @@ export default function Dashboard() {
                                         className="btn btn-primary"
                                         style={{ padding: '8px 16px', fontSize: '0.9rem' }}
                                     >
-                                        Study Now 🐶
+                                        Study Now 📚
                                     </Link>
                                 </div>
                             </div>
@@ -152,55 +153,37 @@ export default function Dashboard() {
                 </Link>
             </section>
 
-            <section style={{ marginTop: '24px' }}>
-                <div className="card" style={{ background: 'linear-gradient(135deg, #FF7E36 0%, #FFD700 100%)', color: 'white' }}>
-                    <h2 className="text-h2" style={{ color: 'white' }}>Weekly Challenge</h2>
-                    <p style={{ opacity: 0.9 }}>Study for 10 hours total to unlock the "Golden Collar".</p>
-                </div>
-            </section>
+
+
+
 
             {/* Delete Confirmation Modal */}
-            {classToDelete && (
-                <div style={{
-                    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-                    background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100
-                }} onClick={() => setClassToDelete(null)}>
-                    <div style={{ background: 'white', padding: '24px', borderRadius: '16px', textAlign: 'center', width: '90%', maxWidth: '300px' }} onClick={e => e.stopPropagation()}>
-                        <h3 className="text-h2" style={{ marginTop: 0 }}>Delete Class?</h3>
-                        <p className="text-body" style={{ marginBottom: '24px' }}>
-                            Are you sure you want to delete this class? This action cannot be undone.
-                        </p>
-                        <div style={{ display: 'flex', gap: '12px' }}>
-                            <button
-                                onClick={() => setClassToDelete(null)}
-                                className="btn btn-secondary"
-                                style={{ flex: 1 }}
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={confirmDelete}
-                                className="btn"
-                                style={{ background: 'var(--color-error)', color: 'white', flex: 1 }}
-                            >
-                                Delete
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            <Modal
+                isOpen={!!classToDelete}
+                onClose={() => setClassToDelete(null)}
+                title="Delete Class?"
+                type="danger"
+                actions={
+                    <>
+                        <button className="btn btn-secondary" onClick={() => setClassToDelete(null)}>Cancel</button>
+                        <button className="btn" style={{ background: 'var(--color-error)', color: 'white' }} onClick={confirmDelete}>Delete</button>
+                    </>
+                }
+            >
+                Are you sure you want to delete this class? This action cannot be undone.
+            </Modal>
 
-            {/* Earned Modal */}
+            {/* Earned Modal - Keeping custom for "Reward" feel */}
             {showEarnedModal && (
                 <div style={{
                     position: 'fixed', top: '10%', left: '50%', transform: 'translateX(-50%)',
-                    zIndex: 100, pointerEvents: 'none'
+                    zIndex: 2000, pointerEvents: 'none'
                 }}>
                     <div style={{
                         background: 'white',
                         padding: '16px 24px',
                         borderRadius: 'var(--radius-full)',
-                        boxShadow: 'var(--shadow-float)',
+                        boxShadow: '0 10px 40px -10px rgba(0,0,0,0.2)',
                         display: 'flex',
                         alignItems: 'center',
                         gap: '12px',
@@ -210,7 +193,7 @@ export default function Dashboard() {
                         <div style={{ fontSize: '1.5rem' }}>{isWinner ? '🏆' : '🌭'}</div>
                         <div>
                             <p style={{ fontWeight: 'bold', fontSize: '0.9rem' }}>{isWinner ? 'You Won!' : 'Good Job!'}</p>
-                            <p style={{ fontSize: '0.8rem', color: 'var(--color-primary)' }}>+{earnedAmount} Inches</p>
+                            <p style={{ fontSize: '0.8rem', color: 'var(--color-primary)' }}>+{earnedAmount} Coins 💰</p>
                         </div>
                     </div>
                 </div>

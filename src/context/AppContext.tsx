@@ -15,9 +15,13 @@ export type ScheduleItem = {
     day: 'Mon' | 'Tue' | 'Wed' | 'Thu' | 'Fri' | 'Sat' | 'Sun';
     startTime: string; // "HH:mm" 24h format
     endTime: string;
-    type: 'class' | 'study' | 'extracurricular' | 'sleep';
+    type: 'class' | 'study' | 'extracurricular' | 'sleep' | 'block';
     label?: string; // e.g. "Math 101" or "Soccer Practice"
     classId?: string; // Optional link to a class
+    isRecurring?: boolean; // Default true if undefined (legacy)
+    specificDate?: string; // ISO Date YYYY-MM-DD for non-recurring
+    startDate?: string; // ISO Date YYYY-MM-DD for recurring start
+    color?: string; // Custom color for the block
 };
 
 export type StudySession = {
@@ -36,6 +40,11 @@ type AppState = {
     inventory: string[];
     equippedAvatar: string;
     isOnboarded: boolean;
+    sleepSettings?: {
+        enabled: boolean;
+        start: string; // "HH:mm"
+        end: string;   // "HH:mm"
+    };
 };
 
 type AppContextType = {
@@ -47,12 +56,15 @@ type AppContextType = {
     replaceClassSchedule: (classId: string, newItems: ScheduleItem[]) => void;
     clearSchedule: () => void;
     clearStudySchedule: () => void;
+    removeScheduleItem: (id: string) => void;
+    updateScheduleItem: (item: ScheduleItem) => void;
     recordSession: (session: StudySession) => void;
     addPoints: (amount: number) => void;
     removePoints: (amount: number) => void;
     buyItem: (itemName: string, cost: number) => void;
     equipAvatar: (avatarName: string) => void;
     completeOnboarding: () => void;
+    updateSleepSettings: (settings: { enabled: boolean; start: string; end: string }) => void;
     resetData: () => void;
 };
 
@@ -65,6 +77,11 @@ const initialState: AppState = {
     inventory: [],
     equippedAvatar: 'Default Dog',
     isOnboarded: false,
+    sleepSettings: {
+        enabled: false,
+        start: '22:00',
+        end: '06:00'
+    }
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -186,6 +203,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         return null; // Or a loading spinner
     }
 
+    const removeScheduleItem = (id: string) => {
+        setState((prev) => ({
+            ...prev,
+            schedule: prev.schedule.filter((s) => s.id !== id),
+        }));
+    };
+
+    const updateScheduleItem = (updatedItem: ScheduleItem) => {
+        setState((prev) => ({
+            ...prev,
+            schedule: prev.schedule.map((s) => (s.id === updatedItem.id ? updatedItem : s)),
+        }));
+    };
+
+    const updateSleepSettings = (settings: { enabled: boolean; start: string; end: string }) => {
+        setState((prev) => ({ ...prev, sleepSettings: settings }));
+    };
+
     return (
         <AppContext.Provider
             value={{
@@ -197,12 +232,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 replaceClassSchedule,
                 clearSchedule,
                 clearStudySchedule,
+                removeScheduleItem,
+                updateScheduleItem,
                 recordSession,
                 addPoints,
                 removePoints,
                 buyItem,
                 equipAvatar,
                 completeOnboarding,
+                updateSleepSettings,
                 resetData,
             }}
         >

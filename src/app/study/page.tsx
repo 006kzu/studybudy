@@ -30,6 +30,29 @@ export default function StudyPage() {
     const userAvatarItem = AVATARS.find(a => a.name === state.equippedAvatar);
     const userAvatarSrc = userAvatarItem ? userAvatarItem.filename : '/assets/run.png';
 
+    // Calculate Weekly Progress
+    const getStartOfWeek = () => {
+        const now = new Date();
+        const day = now.getDay();
+        const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+        const monday = new Date(now.setDate(diff));
+        monday.setHours(0, 0, 0, 0);
+        return monday.getTime();
+    };
+
+    const weeklyMinutes = state.studySessions
+        .filter(s => s.classId === classId && s.timestamp >= getStartOfWeek())
+        .reduce((acc, curr) => acc + curr.durationMinutes, 0);
+
+    const goalMinutes = targetClass ? targetClass.weeklyGoalMinutes : 0;
+
+    // Verbose time format: "13 mins 2 Seconds"
+    const formatVerboseTime = (totalSeconds: number) => {
+        const m = Math.floor(totalSeconds / 60);
+        const s = totalSeconds % 60;
+        return `${m} mins ${s} Seconds`;
+    };
+
     // Initialize Bots
     useEffect(() => {
         setBots([
@@ -151,6 +174,41 @@ export default function StudyPage() {
                     zIndex: 20,
                     opacity: isActive ? 1 : 0.5
                 }}>
+                    {/* Stats Bubble */}
+                    <div style={{
+                        position: 'absolute',
+                        bottom: '100%',
+                        left: '50%',
+                        transform: 'translateX(-50%)',
+                        marginBottom: '10px',
+                        background: 'white',
+                        padding: '8px 12px',
+                        borderRadius: '12px',
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+                        whiteSpace: 'nowrap',
+                        textAlign: 'center',
+                        fontSize: '0.8rem',
+                        fontWeight: 'bold',
+                        color: '#222' // Force dark text
+                    }}>
+                        <div style={{ fontSize: '0.9rem', marginBottom: '2px', color: '#222' }}>{formatVerboseTime(seconds)}</div>
+                        <div style={{ color: '#666', fontSize: '0.75rem' }}>
+                            ({weeklyMinutes} / {goalMinutes} mins)
+                        </div>
+                        {/* Triangle pointer */}
+                        <div style={{
+                            position: 'absolute',
+                            bottom: '-6px',
+                            left: '50%',
+                            transform: 'translateX(-50%)',
+                            width: 0,
+                            height: 0,
+                            borderLeft: '6px solid transparent',
+                            borderRight: '6px solid transparent',
+                            borderTop: '6px solid white'
+                        }}></div>
+                    </div>
+
                     <img src={userAvatarSrc} style={{
                         width: '100px',
                         imageRendering: 'pixelated',

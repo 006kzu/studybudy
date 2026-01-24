@@ -5,14 +5,20 @@ import Link from 'next/link';
 import { useState } from 'react';
 import WienerAvatar from '@/components/WienerAvatar';
 import { AVATARS } from '@/constants/avatars';
+import Modal from '@/components/Modal';
+import Toast from '@/components/Toast';
 
 export default function ShopPage() {
     const { state, buyItem, equipAvatar } = useApp();
-    const [showPoorPopup, setShowPoorPopup] = useState(false);
+    const [toastMsg, setToastMsg] = useState<{ msg: string, type: 'error' | 'success' } | null>(null);
+    const [selectedItem, setSelectedItem] = useState<{ name: string, price: number } | null>(null);
 
     // Filter out "Default Dog" if you don't want to sell it (it's price 0, implies owned)
     // Or keep it to show "Equipped"
     const ITEMS = AVATARS;
+
+    const ownedCount = state.inventory ? state.inventory.length : 0;
+    const totalCount = ITEMS.length;
 
     const handleAction = (item: { name: string, price: number }) => {
         const isOwned = state.inventory?.includes(item.name);
@@ -22,15 +28,24 @@ export default function ShopPage() {
 
         if (isOwned) {
             equipAvatar(item.name);
+            setToastMsg({ msg: `Equipped ${item.name}!`, type: 'success' });
         } else {
             // Buy logic
             if (state.points < item.price) {
-                setShowPoorPopup(true);
-                setTimeout(() => setShowPoorPopup(false), 3000);
+                setToastMsg({ msg: "Spend more time studying to unlock this character 💰", type: 'error' });
             } else {
-                buyItem(item.name, item.price);
-                equipAvatar(item.name);
+                // Open confirmation Modal
+                setSelectedItem(item);
             }
+        }
+    };
+
+    const confirmPurchase = () => {
+        if (selectedItem) {
+            buyItem(selectedItem.name, selectedItem.price);
+            equipAvatar(selectedItem.name);
+            setToastMsg({ msg: `Bought ${selectedItem.name}!`, type: 'success' });
+            setSelectedItem(null);
         }
     };
 
@@ -43,7 +58,12 @@ export default function ShopPage() {
             </div>
 
             <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-                <h1 className="text-h1">Pet Shop</h1>
+                <div>
+                    <h1 className="text-h1" style={{ marginBottom: '4px' }}>Pet Shop</h1>
+                    <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.9rem' }}>
+                        Collection: <strong>{ownedCount}</strong> / {totalCount}
+                    </p>
+                </div>
                 <WienerAvatar points={state.points} inventory={state.inventory} equippedAvatar={state.equippedAvatar} />
             </header>
 
@@ -75,13 +95,13 @@ export default function ShopPage() {
                                         maxHeight: '100%',
                                         objectFit: 'contain',
                                         imageRendering: 'pixelated', // Keep pixel art crisp
-                                        filter: !isOwned && state.points < item.price ? 'grayscale(100%)' : 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))'
+                                        filter: !isOwned ? 'brightness(0) opacity(0.5)' : 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))'
                                     }}
                                 />
                             </div>
                             <h3 style={{ fontSize: '1rem', fontWeight: 600 }}>{item.name}</h3>
                             <p style={{ color: 'var(--color-primary)', fontWeight: 'bold' }}>
-                                {isOwned ? 'Owned' : `${item.price} inches`}
+                                {isOwned ? 'Owned' : `${item.price} Coins 💰`}
                             </p>
                             <button
                                 className={`btn ${isOwned ? 'btn-secondary' : 'btn-secondary'}`}
@@ -94,27 +114,35 @@ export default function ShopPage() {
                                 }}
                                 disabled={isEquipped}
                             >
-                                {isEquipped ? 'Equipped' : (isOwned ? 'Equip' : (state.points >= item.price ? 'Buy' : 'Locked'))}
+                                {isEquipped ? 'Equipped' : (isOwned ? 'Equip' : (state.points >= item.price ? 'Unlock' : 'Locked'))}
                             </button>
                         </div>
                     );
                 })}
             </div>
 
-            {/* Insufficient Funds Popup */}
-            {showPoorPopup && (
-                <div style={{
-                    position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)',
-                    background: '#222', color: '#ff6b6b', padding: '12px 24px', borderRadius: '50px',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.4)', zIndex: 100,
-                    animation: 'fadeIn 0.3s ease-out',
-                    whiteSpace: 'nowrap',
-                    fontSize: '0.9rem',
-                    fontWeight: 'bold',
-                    border: '1px solid #ff6b6b'
-                }}>
-                    You don't have a big enough wiener 🌭
-                </div>
+            {/* Confirmation Modal */}
+            <Modal
+                isOpen={!!selectedItem}
+                onClose={() => setSelectedItem(null)}
+                title="Confirm Unlock"
+                actions={
+                    <>
+                        <button className="btn btn-secondary" onClick={() => setSelectedItem(null)}>Cancel</button>
+                        <button className="btn btn-primary" onClick={confirmPurchase}>Unlock Now</button>
+                    </>
+                }
+            >
+                Are you sure you want to unlock <strong>{selectedItem?.name}</strong> for <strong>{selectedItem?.price} Coins 💰</strong>?
+            </Modal>
+
+            {/* Notification Toast */}
+            {toastMsg && (
+                <Toast
+                    message={toastMsg.msg}
+                    type={toastMsg.type}
+                    onClose={() => setToastMsg(null)}
+                />
             )}
         </main>
     );
