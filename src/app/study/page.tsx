@@ -3,6 +3,7 @@
 import { useApp } from '@/context/AppContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState, useRef } from 'react';
+import { AVATARS } from '@/constants/avatars';
 
 // Random name generator for opponents
 const BOT_NAMES = ['Speedy', 'Noodle', 'Frankie', 'Sausage', 'Chip'];
@@ -24,6 +25,10 @@ export default function StudyPage() {
     const raceInterval = useRef<NodeJS.Timeout | null>(null);
 
     const targetClass = state.classes.find(c => c.id === classId);
+
+    // Get User Avatar
+    const userAvatarItem = AVATARS.find(a => a.name === state.equippedAvatar);
+    const userAvatarSrc = userAvatarItem ? userAvatarItem.filename : '/assets/run.png';
 
     // Initialize Bots
     useEffect(() => {
@@ -72,22 +77,25 @@ export default function StudyPage() {
         const userScore = userPos;
         const isWinner = bots.every(b => userScore > b.pos);
 
-        // Award Points: 1 pt per minute + 50 pts for winning
-        const minutes = Math.ceil(seconds / 60);
-        const points = minutes + (isWinner ? 50 : 10);
+        // Award Points: 
+        // 1. Time based: 1 point per second
+        // 2. Bonus: 100 points for completing the session
+        const timePoints = seconds;
+        const bonusPoints = 100;
+        const totalPoints = timePoints + bonusPoints;
 
         if (targetClass) {
             // Save
             recordSession({
                 id: crypto.randomUUID(),
                 classId: targetClass.id,
-                durationMinutes: minutes,
+                durationMinutes: Math.ceil(seconds / 60),
                 timestamp: Date.now(),
-                pointsEarned: points
+                pointsEarned: totalPoints
             });
 
             // Redirect to Dashboard with popup trigger
-            router.push(`/dashboard?earned=${points}&winner=${isWinner}`);
+            router.push(`/dashboard?earned=${totalPoints}&winner=${isWinner}`);
         } else {
             router.push('/dashboard');
         }
@@ -143,10 +151,11 @@ export default function StudyPage() {
                     zIndex: 20,
                     opacity: isActive ? 1 : 0.5
                 }}>
-                    <img src="/assets/run.png" style={{
+                    <img src={userAvatarSrc} style={{
                         width: '100px',
                         imageRendering: 'pixelated',
-                        transform: 'scaleX(-1)' // Face right
+                        transform: 'scaleX(1) translateY(-20px)', // Lift up slightly to stand on line
+                        filter: 'drop-shadow(0 4px 4px rgba(0,0,0,0.3))'
                     }} />
                     <div style={{ textAlign: 'center', fontWeight: 'bold', color: 'white', textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>You</div>
                 </div>

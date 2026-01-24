@@ -4,15 +4,30 @@ import { useApp } from '@/context/AppContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import WienerAvatar from '@/components/WienerAvatar';
 
 export default function Dashboard() {
-    const { state } = useApp();
+    const { state, removeClass } = useApp();
     const searchParams = useSearchParams();
     const router = useRouter();
 
     const [showEarnedModal, setShowEarnedModal] = useState(false);
     const [earnedAmount, setEarnedAmount] = useState(0);
     const [isWinner, setIsWinner] = useState(false);
+
+    // Delete Confirmation State
+    const [classToDelete, setClassToDelete] = useState<string | null>(null);
+
+    const handleDeleteClick = (id: string) => {
+        setClassToDelete(id);
+    };
+
+    const confirmDelete = () => {
+        if (classToDelete) {
+            removeClass(classToDelete);
+            setClassToDelete(null);
+        }
+    };
 
     // Check for earnings on mount
     useEffect(() => {
@@ -46,24 +61,14 @@ export default function Dashboard() {
             <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
                 <div>
                     <h1 className="text-h1">Dashboard</h1>
-                    <div style={{ display: 'flex', gap: '16px' }}>
+                    <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
                         <Link href="/schedule" style={{ fontSize: '0.9rem', color: 'var(--color-primary)', fontWeight: 600 }}>📅 Schedule</Link>
                         <Link href="/shop" style={{ fontSize: '0.9rem', color: 'var(--color-primary)', fontWeight: 600 }}>🛍️ Shop</Link>
+                        <Link href="/settings" style={{ fontSize: '1.2rem', textDecoration: 'none' }} title="Settings">⚙️</Link>
                     </div>
                 </div>
-                <div style={{
-                    background: 'var(--color-surface)',
-                    padding: '8px 16px',
-                    borderRadius: 'var(--radius-full)',
-                    boxShadow: 'var(--shadow-sm)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    fontWeight: 'bold'
-                }}>
-                    <span>🦴</span>
-                    <span>{state.points}</span>
-                </div>
+
+                <WienerAvatar points={state.points} inventory={state.inventory} equippedAvatar={state.equippedAvatar} />
             </header>
 
             <section>
@@ -82,8 +87,31 @@ export default function Dashboard() {
                         const percent = Math.min(100, (progress / goal) * 100);
 
                         return (
-                            <div key={cls.id} className="card" style={{ borderLeft: `6px solid ${cls.color}` }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                            <div key={cls.id} className="card" style={{ borderLeft: `6px solid ${cls.color}`, position: 'relative' }}>
+                                {/* Delete Button */}
+                                <button
+                                    onClick={() => handleDeleteClick(cls.id)}
+                                    style={{
+                                        position: 'absolute', top: '10px', right: '10px',
+                                        background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '1.2rem', opacity: 0.5
+                                    }}
+                                >
+                                    &times;
+                                </button>
+
+                                {/* Edit Button */}
+                                <Link
+                                    href={`/onboarding?classId=${cls.id}`}
+                                    style={{
+                                        position: 'absolute', top: '12px', right: '40px',
+                                        background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '1rem', opacity: 0.5,
+                                        textDecoration: 'none'
+                                    }}
+                                >
+                                    ✏️
+                                </Link>
+
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', paddingRight: '24px' }}>
                                     <h3 style={{ fontSize: '1.2rem', fontWeight: 600 }}>{cls.name}</h3>
                                     <span style={{ color: 'var(--color-text-secondary)' }}>{Math.round(progress / 60)} / {goal / 60} hrs</span>
                                 </div>
@@ -117,6 +145,11 @@ export default function Dashboard() {
                         );
                     })
                 )}
+
+                {/* Add Class Button - Bottom of List */}
+                <Link href="/onboarding" className="btn btn-secondary" style={{ width: '100%', marginTop: '16px', borderStyle: 'dashed' }}>
+                    ➕ Add Another Class
+                </Link>
             </section>
 
             <section style={{ marginTop: '24px' }}>
@@ -125,6 +158,37 @@ export default function Dashboard() {
                     <p style={{ opacity: 0.9 }}>Study for 10 hours total to unlock the "Golden Collar".</p>
                 </div>
             </section>
+
+            {/* Delete Confirmation Modal */}
+            {classToDelete && (
+                <div style={{
+                    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                    background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100
+                }} onClick={() => setClassToDelete(null)}>
+                    <div style={{ background: 'white', padding: '24px', borderRadius: '16px', textAlign: 'center', width: '90%', maxWidth: '300px' }} onClick={e => e.stopPropagation()}>
+                        <h3 className="text-h2" style={{ marginTop: 0 }}>Delete Class?</h3>
+                        <p className="text-body" style={{ marginBottom: '24px' }}>
+                            Are you sure you want to delete this class? This action cannot be undone.
+                        </p>
+                        <div style={{ display: 'flex', gap: '12px' }}>
+                            <button
+                                onClick={() => setClassToDelete(null)}
+                                className="btn btn-secondary"
+                                style={{ flex: 1 }}
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={confirmDelete}
+                                className="btn"
+                                style={{ background: 'var(--color-error)', color: 'white', flex: 1 }}
+                            >
+                                Delete
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Earned Modal */}
             {showEarnedModal && (
@@ -143,10 +207,10 @@ export default function Dashboard() {
                         animation: 'fadeIn 0.3s ease-out',
                         border: '1px solid var(--color-border)'
                     }}>
-                        <div style={{ fontSize: '1.5rem' }}>{isWinner ? '🏆' : '🦴'}</div>
+                        <div style={{ fontSize: '1.5rem' }}>{isWinner ? '🏆' : '🌭'}</div>
                         <div>
                             <p style={{ fontWeight: 'bold', fontSize: '0.9rem' }}>{isWinner ? 'You Won!' : 'Good Job!'}</p>
-                            <p style={{ fontSize: '0.8rem', color: 'var(--color-primary)' }}>+{earnedAmount} Bones</p>
+                            <p style={{ fontSize: '0.8rem', color: 'var(--color-primary)' }}>+{earnedAmount} Inches</p>
                         </div>
                     </div>
                 </div>

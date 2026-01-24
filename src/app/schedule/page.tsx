@@ -7,9 +7,10 @@ const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const HOURS = Array.from({ length: 18 }, (_, i) => i + 6); // 6am to 11pm (24h)
 
 export default function SchedulePage() {
-    const { state, addScheduleItem } = useApp();
+    const { state, addScheduleItem, clearStudySchedule } = useApp();
 
     const handleAutoSchedule = () => {
+        // ... (existing auto schedule logic)
         // Basic greedy algorithm
         // 1. Identify study needs per class (goal - current). For MVP just schedule 'Goal' amount.
         // 2. Find empty slots.
@@ -32,7 +33,8 @@ export default function SchedulePage() {
                     startTime: `${currentHour}:00`,
                     endTime: `${currentHour + 1}:00`,
                     type: 'study',
-                    label: `Study ${cls.name}`
+                    label: `Study ${cls.name}`,
+                    classId: cls.id
                 };
 
                 addScheduleItem(newItem);
@@ -50,6 +52,8 @@ export default function SchedulePage() {
         alert('Schedule updated with study blocks!');
     };
 
+    const hasStudyItems = state.schedule.some(s => s.type === 'study');
+
     return (
         <main className="container">
             <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
@@ -57,10 +61,23 @@ export default function SchedulePage() {
                 <Link href="/dashboard" className="btn btn-secondary">Done</Link>
             </header>
 
-            <div style={{ marginBottom: '24px' }}>
-                <button onClick={handleAutoSchedule} className="btn btn-primary" style={{ width: '100%' }}>
+            <div style={{ marginBottom: '24px', display: 'flex', gap: '12px' }}>
+                <button onClick={handleAutoSchedule} className="btn btn-primary" style={{ flex: 1 }}>
                     ✨ Auto-Fill Study Schedule
                 </button>
+                {hasStudyItems && (
+                    <button
+                        onClick={() => {
+                            if (confirm('Clear all auto-generated study blocks? Your class schedule will remain.')) {
+                                clearStudySchedule();
+                            }
+                        }}
+                        className="btn"
+                        style={{ background: 'var(--color-error)', color: 'white', flex: 1 }}
+                    >
+                        🗑️ Clear Study Times
+                    </button>
+                )}
             </div>
 
             <div className="card" style={{ overflowX: 'auto' }}>
@@ -71,29 +88,54 @@ export default function SchedulePage() {
 
                     {/* Grid */}
                     {HOURS.map(h => (
-                        <>
-                            <div key={`time-${h}`} style={{ fontSize: '0.8rem', color: '#888', textAlign: 'right', paddingRight: '8px' }}>
+                        <div key={`row-${h}`} style={{ display: 'contents' }}>
+                            <div style={{ fontSize: '0.8rem', color: '#888', textAlign: 'right', paddingRight: '8px' }}>
                                 {h}:00
                             </div>
                             {DAYS.map(d => {
                                 // Find event
                                 const event = state.schedule.find(s => s.day === d && parseInt(s.startTime) === h);
 
+                                // Determine Color
+                                let bgColor = '#f5f5f5';
+                                let textColor = 'transparent';
+                                let borderColor = 'var(--color-border)';
+
+                                if (event) {
+                                    textColor = 'white';
+                                    borderColor = 'transparent';
+
+                                    // Try to match label to a class
+                                    const associatedClass = state.classes.find(c =>
+                                        c.name === event.label || event.label?.endsWith(c.name)
+                                    );
+
+                                    if (associatedClass) {
+                                        bgColor = associatedClass.color;
+                                    } else if (event.type === 'study') {
+                                        bgColor = 'var(--color-primary)';
+                                    } else {
+                                        bgColor = 'var(--color-secondary)';
+                                    }
+                                }
+
                                 return (
                                     <div key={`${d}-${h}`} style={{
                                         height: '50px',
-                                        background: event ? (event.type === 'study' ? 'var(--color-primary)' : 'var(--color-secondary)') : '#f5f5f5',
+                                        background: bgColor,
                                         borderRadius: '4px',
                                         fontSize: '0.7rem',
                                         padding: '4px',
-                                        color: event ? 'white' : 'transparent',
-                                        border: '1px solid var(--color-border)'
+                                        color: textColor,
+                                        border: `1px solid ${borderColor}`,
+                                        // Slight opacity if it's a "Study" block to differentiate from class
+                                        opacity: event?.type === 'study' ? 0.8 : 1
                                     }}>
                                         {event?.label}
                                     </div>
                                 );
                             })}
-                        </>
+                        </div>
                     ))}
                 </div>
             </div>
