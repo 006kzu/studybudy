@@ -113,76 +113,94 @@ function OnboardingContent() {
         }
     };
 
-    const handleFinish = () => {
-        const classId = editClassId || crypto.randomUUID();
-        const classData = {
-            id: classId,
-            name: className,
-            weeklyGoalMinutes: durationGoal * 60,
-            color: color,
-        };
+    const handleFinish = async () => {
+        console.log('Starting handleFinish...');
+        try {
+            const classId = editClassId || crypto.randomUUID();
+            const classData = {
+                id: classId,
+                name: className,
+                weeklyGoalMinutes: durationGoal * 60,
+                color: color,
+            };
 
-        const newScheduleItems: ScheduleItem[] = [];
-        DAYS.forEach(day => {
-            const daySlots = Array.from(selectedSlots)
-                .filter(s => s.startsWith(`${day}-`))
-                .map(s => {
-                    const [_, time] = s.split('-');
-                    const [h, m] = time.split(':').map(Number);
-                    return { h, m, val: h * 60 + m };
-                })
-                .sort((a, b) => a.val - b.val);
+            const newScheduleItems: ScheduleItem[] = [];
 
-            if (daySlots.length === 0) return;
+            // ... (schedule generation logic omitted for brevity, keeping existing) ...
+            DAYS.forEach(day => {
+                const daySlots = Array.from(selectedSlots)
+                    .filter(s => s.startsWith(`${day}-`))
+                    .map(s => {
+                        const [_, time] = s.split('-');
+                        const [h, m] = time.split(':').map(Number);
+                        return { h, m, val: h * 60 + m };
+                    })
+                    .sort((a, b) => a.val - b.val);
 
-            // Merge contiguous
-            let start = daySlots[0];
-            let last = daySlots[0];
+                if (daySlots.length === 0) return;
 
-            for (let i = 1; i < daySlots.length; i++) {
-                const curr = daySlots[i];
-                if (curr.val === last.val + 15) {
-                    last = curr;
-                } else {
-                    pushItem(day, start, last);
-                    start = curr;
-                    last = curr;
+                // Merge contiguous
+                let start = daySlots[0];
+                let last = daySlots[0];
+
+                for (let i = 1; i < daySlots.length; i++) {
+                    const curr = daySlots[i];
+                    if (curr.val === last.val + 15) {
+                        last = curr;
+                    } else {
+                        pushItem(day, start, last);
+                        start = curr;
+                        last = curr;
+                    }
+                }
+                pushItem(day, start, last);
+            });
+
+            function pushItem(day: string, start: { h: number, m: number }, last: { h: number, m: number }) {
+                let endH = last.h;
+                let endM = last.m + 15;
+                if (endM >= 60) {
+                    endH++;
+                    endM = 0;
+                }
+                const startStr = `${start.h}:${start.m.toString().padStart(2, '0')}`;
+                const endStr = `${endH}:${endM.toString().padStart(2, '0')}`;
+
+                newScheduleItems.push({
+                    id: crypto.randomUUID(),
+                    day: day as any,
+                    startTime: startStr,
+                    endTime: endStr,
+                    type: 'class',
+                    label: className,
+                    classId: classId
+                });
+            }
+
+            console.log('Items prepared. Saving...');
+            if (editClassId) {
+                console.log('Updating class...');
+                await updateClass(classData);
+                console.log('Replacing schedule...');
+                await replaceClassSchedule(classId, newScheduleItems);
+            } else {
+                console.log('Adding class...');
+                await addClass(classData);
+                if (newScheduleItems.length > 0) {
+                    console.log('Adding schedule items...');
+                    await replaceClassSchedule(classId, newScheduleItems);
                 }
             }
-            pushItem(day, start, last);
-        });
 
-        function pushItem(day: string, start: { h: number, m: number }, last: { h: number, m: number }) {
-            let endH = last.h;
-            let endM = last.m + 15;
-            if (endM >= 60) {
-                endH++;
-                endM = 0;
-            }
-            const startStr = `${start.h}:${start.m.toString().padStart(2, '0')}`;
-            const endStr = `${endH}:${endM.toString().padStart(2, '0')}`;
-
-            newScheduleItems.push({
-                id: crypto.randomUUID(),
-                day: day as any,
-                startTime: startStr,
-                endTime: endStr,
-                type: 'class',
-                label: className,
-                classId: classId
-            });
+            console.log('Completing onboarding...');
+            await completeOnboarding();
+            console.log('Navigating to dashboard...');
+            // Force navigation to ensure we leave the page
+            window.location.assign('/dashboard');
+        } catch (error) {
+            console.error('CRITICAL ERROR in handleFinish:', error);
+            alert('Something went wrong saving your class. Check console for details.');
         }
-
-        if (editClassId) {
-            updateClass(classData);
-            replaceClassSchedule(classId, newScheduleItems);
-        } else {
-            addClass(classData);
-            newScheduleItems.forEach(item => addScheduleItem(item));
-        }
-
-        completeOnboarding();
-        router.push('/dashboard');
     };
 
     useEffect(() => {
@@ -266,6 +284,16 @@ function OnboardingContent() {
                             style={{ background: 'transparent', border: 'none', color: 'var(--color-error)', width: '100%', maxWidth: '500px', margin: '0 auto', display: 'block', textDecoration: 'underline' }}
                         >
                             Delete This Class
+                        </button>
+                    )}
+
+                    {!editClassId && (
+                        <button
+                            onClick={() => router.push('/dashboard')}
+                            className="btn"
+                            style={{ background: 'transparent', border: 'none', color: '#666', width: '100%', maxWidth: '500px', margin: '8px auto', display: 'block', textDecoration: 'underline' }}
+                        >
+                            Cancel
                         </button>
                     )}
 
@@ -369,6 +397,7 @@ function OnboardingContent() {
 
                     <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
                         <button onClick={() => setStep(1)} className="btn btn-secondary" style={{ flex: 1 }}>Back</button>
+                        <button onClick={() => router.push('/dashboard')} className="btn" style={{ flex: 1, background: 'transparent', border: '1px solid #ddd', color: '#666' }}>Cancel</button>
                         <button onClick={() => setSelectedSlots(new Set())} className="btn btn-secondary" style={{ flex: 1, color: 'var(--color-error)', borderColor: 'var(--color-error)' }} disabled={selectedSlots.size === 0}>
                             Clear
                         </button>

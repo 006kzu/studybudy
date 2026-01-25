@@ -7,7 +7,7 @@ import { useState, useEffect } from 'react';
 import Modal from '@/components/Modal';
 
 export default function SettingsPage() {
-    const { clearSchedule, resetData, addPoints, state, updateSleepSettings } = useApp();
+    const { clearSchedule, resetData, addPoints, state, updateSleepSettings, user, signOut, refreshData } = useApp();
     const router = useRouter();
 
     const [showConfirm, setShowConfirm] = useState(false);
@@ -40,6 +40,11 @@ export default function SettingsPage() {
         router.push('/onboarding');
     };
 
+    const handleLogout = async () => {
+        await signOut();
+        window.location.href = '/login';
+    };
+
     const saveSleepSettings = () => {
         updateSleepSettings({
             enabled: sleepEnabled,
@@ -57,6 +62,37 @@ export default function SettingsPage() {
                 </Link>
                 <h1 className="text-h1">Settings</h1>
             </header>
+
+            <section className="card" style={{ marginBottom: '24px' }}>
+                <h2 className="text-h2">Account ☁️</h2>
+                {user ? (
+                    <div>
+                        <p className="text-body" style={{ marginBottom: '16px' }}>
+                            Logged in as: <strong>{user.email}</strong>
+                        </p>
+                        <p className="text-body" style={{ fontSize: '0.75rem', color: '#999', fontFamily: 'monospace', marginBottom: '16px' }}>
+                            ID: {user.id}
+                        </p>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                            <button onClick={handleLogout} className="btn btn-secondary">
+                                Log Out
+                            </button>
+                            <button onClick={() => refreshData().then(() => alert('Data Refreshed! Check Console.'))} className="btn btn-primary">
+                                🔄 Force Sync
+                            </button>
+                        </div>
+                    </div>
+                ) : (
+                    <div>
+                        <p className="text-body" style={{ marginBottom: '16px' }}>
+                            Sign in to save your progress and sync across devices.
+                        </p>
+                        <Link href="/login" className="btn btn-primary">
+                            Login / Sign Up
+                        </Link>
+                    </div>
+                )}
+            </section>
 
             <section className="card" style={{ marginBottom: '24px' }}>
                 <h2 className="text-h2">Sleep Schedule 😴</h2>

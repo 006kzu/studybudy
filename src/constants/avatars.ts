@@ -66,5 +66,13 @@ export const AVATARS: AvatarItem[] = [
     { name: 'Hotdog', price: 5000, icon: '🌭', filename: '/assets/avatar_hotdog.png' },
     { name: 'Burger', price: 4000, icon: '🍔', filename: '/assets/avatar_burger.png' },
     { name: 'Pizza', price: 4500, icon: '🍕', filename: '/assets/avatar_pizza.png' },
-    { name: 'T-Rex', price: 8500, icon: '🦖', filename: '/assets/avatar_trex.png' }
+    { name: 'T-Rex', price: 8500, icon: '🦖', filename: '/assets/avatar_trex.png' },
+
+    // Legendary
+    { name: 'Diamond Dog', price: 50000, icon: '💎', filename: '/assets/avatar_diamond_dog.png' },
+    { name: 'Rainbow Unicorn', price: 75000, icon: '🌈', filename: '/assets/avatar_rainbow_unicorn.png' },
+    { name: 'Phoenix', price: 100000, icon: '🔥', filename: '/assets/avatar_phoenix.png' },
+
+    // God Tier
+    { name: 'Golden Munchkin Cat', price: 1000000, icon: '✨', filename: '/assets/avatar_golden_munchkin.png' }
 ];

@@ -7,8 +7,10 @@ import Link from 'next/link';
 import WienerAvatar from '@/components/WienerAvatar';
 import Modal from '@/components/Modal';
 
-export default function Dashboard() {
-    const { state, removeClass } = useApp();
+import { Suspense } from 'react';
+
+function DashboardContent() {
+    const { state, removeClass, user, signOut, isLoading } = useApp();
     const searchParams = useSearchParams();
     const router = useRouter();
 
@@ -28,6 +30,11 @@ export default function Dashboard() {
             removeClass(classToDelete);
             setClassToDelete(null);
         }
+    };
+
+    const handleLogout = async () => {
+        await signOut();
+        window.location.reload(); // Refresh to show login state
     };
 
     // Check for earnings on mount
@@ -69,12 +76,48 @@ export default function Dashboard() {
                     </div>
                 </div>
 
-                <WienerAvatar points={state.points} inventory={state.inventory} equippedAvatar={state.equippedAvatar} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                    {!user && (
+                        <Link href="/login" className="btn btn-primary" style={{ padding: '8px 16px', fontSize: '0.8rem' }}>
+                            ☁️ Login / Sync
+                        </Link>
+                    )}
+                    {user && (
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', marginRight: '8px' }}>
+                            <span style={{ fontSize: '0.8rem', color: '#666' }}>
+                                {user.email?.split('@')[0]}
+                            </span>
+                            <button
+                                onClick={handleLogout}
+                                style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    color: 'var(--color-primary)',
+                                    fontSize: '0.7rem',
+                                    cursor: 'pointer',
+                                    textDecoration: 'underline',
+                                    padding: 0
+                                }}
+                            >
+                                Log out
+                            </button>
+                        </div>
+                    )}
+                    <WienerAvatar points={state.points} inventory={state.inventory} equippedAvatar={state.equippedAvatar} />
+                </div>
             </header>
 
             <section>
                 <h2 className="text-h2">Your Classes</h2>
-                {state.classes.length === 0 ? (
+                {isLoading ? (
+                    <div className="card text-center" style={{ padding: '40px' }}>
+                        <div style={{ fontSize: '2rem', animation: 'spin 1s linear infinite', display: 'inline-block' }}>🌭</div>
+                        <p className="text-body" style={{ marginTop: '16px' }}>Fetching your schedule...</p>
+                        <style jsx>{`
+                            @keyframes spin { 100% { transform: rotate(360deg); } }
+                         `}</style>
+                    </div>
+                ) : state.classes.length === 0 ? (
                     <div className="card text-center">
                         <p className="text-body">No classes yet.</p>
                         <Link href="/onboarding" className="btn btn-secondary" style={{ marginTop: '16px' }}>
@@ -199,5 +242,13 @@ export default function Dashboard() {
                 </div>
             )}
         </main>
+    );
+}
+
+export default function Dashboard() {
+    return (
+        <Suspense fallback={<div className="container text-center" style={{ marginTop: '20vh' }}>Loading Dashboard...</div>}>
+            <DashboardContent />
+        </Suspense>
     );
 }

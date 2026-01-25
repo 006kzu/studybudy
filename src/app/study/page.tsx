@@ -4,11 +4,12 @@ import { useApp } from '@/context/AppContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState, useRef } from 'react';
 import { AVATARS } from '@/constants/avatars';
+import { Suspense } from 'react';
 
 // Random name generator for opponents
 const BOT_NAMES = ['Speedy', 'Noodle', 'Frankie', 'Sausage', 'Chip'];
 
-export default function StudyPage() {
+function StudyPageContent() {
     const { state, recordSession } = useApp();
     const searchParams = useSearchParams();
     const router = useRouter();
@@ -92,7 +93,7 @@ export default function StudyPage() {
         setIsActive(!isActive);
     };
 
-    const endSession = () => {
+    const endSession = async () => {
         setIsActive(false);
         setFinished(true);
 
@@ -109,7 +110,7 @@ export default function StudyPage() {
 
         if (targetClass) {
             // Save
-            recordSession({
+            await recordSession({
                 id: crypto.randomUUID(),
                 classId: targetClass.id,
                 durationMinutes: Math.ceil(seconds / 60),
@@ -251,5 +252,13 @@ export default function StudyPage() {
             </div>
 
         </main>
+    );
+}
+
+export default function StudyPage() {
+    return (
+        <Suspense fallback={<div className="container text-center" style={{ marginTop: '20vh' }}>Loading Study Session...</div>}>
+            <StudyPageContent />
+        </Suspense>
     );
 }

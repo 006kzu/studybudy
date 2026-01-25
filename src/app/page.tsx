@@ -10,12 +10,9 @@ export default function Home() {
 
   useEffect(() => {
     // Determine where to send the user
-    if (state.isOnboarded) {
-      router.push('/dashboard');
-    } else {
-      router.push('/onboarding');
-    }
-  }, [state.isOnboarded, router]);
+    // Always go to dashboard now - onboarding is optional/manual
+    router.push('/dashboard');
+  }, [router]);
 
   // Loading state while redirecting
   return (
