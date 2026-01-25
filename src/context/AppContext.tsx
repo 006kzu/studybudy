@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { User } from '@supabase/supabase-js';
+import { useRouter } from 'next/navigation';
 
 // --- Types ---
 export type ClassItem = {
@@ -72,6 +73,7 @@ type AppContextType = {
     resetData: () => Promise<void>;
     signOut: () => Promise<void>;
     refreshData: () => Promise<void>;
+    resetClassProgress: (classId: string) => Promise<void>;
 };
 
 const initialState: AppState = {
@@ -97,6 +99,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const [isLoading, setIsLoading] = useState(true);
     const isMounted = useRef(false);
     const lastFetchedUserId = useRef<string | null>(null);
+    const router = useRouter(); // Define router
 
     // 1. Auth & Initial Load
     useEffect(() => {
@@ -599,18 +602,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         console.log('[AppContext] Signing out...');
         try {
             await supabase.auth.signOut();
-            console.log('[AppContext] Supabase signOut complete');
-        } catch (error) {
-            console.error('[AppContext] Error signing out:', error);
-        } finally {
-            // Always clear state and redirect
-            setUser(null);
             setState(initialState);
-            localStorage.removeItem('study_budy_data');
-            // Force hard redirect to login
-            window.location.href = '/login';
+            setUser(null);
+            router.push('/login');
+        } catch (error) {
+            console.error('Error signing out:', error);
         }
     };
+
+    const resetClassProgress = async (classId: string) => {
+        // Remove sessions for this class from local state
+        setState(prev => ({
+            ...prev,
+            studySessions: prev.studySessions.filter(s => s.classId !== classId)
+        }));
+
+        if (user) {
+            // Delete from DB
+            const { error } = await supabase.from('study_sessions').delete().eq('user_id', user.id).eq('class_id', classId);
+            if (error) console.error('Error resetting class progress:', error);
+        }
+    };
+
 
     return (
         <AppContext.Provider
@@ -637,6 +650,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 resetData,
                 signOut,
                 refreshData,
+                resetClassProgress
             }}
         >
             {children}
