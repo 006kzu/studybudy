@@ -6,7 +6,7 @@ import { useApp, ScheduleItem } from '@/context/AppContext';
 import Modal from '@/components/Modal';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
-const HOURS = Array.from({ length: 13 }, (_, i) => i + 8); // 8am to 8pm
+// HOURS is now dynamic inside component
 
 function OnboardingContent() {
     const { state, addClass, updateClass, addScheduleItem, replaceClassSchedule, completeOnboarding, removeClass } = useApp();
@@ -28,11 +28,55 @@ function OnboardingContent() {
     const isDragging = useRef(false);
     const addMode = useRef(true);
 
+    // Dynamic Hours based on Awake Time
+    let awakeHours: number[] = [];
+    if (state.sleepSettings?.enabled) {
+        const [wakeH] = state.sleepSettings.end.split(':').map(Number);
+        const [sleepH] = state.sleepSettings.start.split(':').map(Number);
+
+        let curr = wakeH;
+        // Safety cap to prevent infinite loop if settings are weird
+        let iterations = 0;
+        while (curr !== sleepH && iterations < 24) {
+            awakeHours.push(curr);
+            curr++;
+            if (curr >= 24) curr = 0;
+            iterations++;
+        }
+        // Add the sleep hour itself as the cutoff? No, range is [start, end).
+    } else {
+        // Default 8am - 9pm if sleep disabled
+        awakeHours = Array.from({ length: 13 }, (_, i) => i + 8);
+    }
+
+    // Sort logic handled by simply iterating? 
+    // If wake is 6am and sleep is 10pm -> 6,7,8...21.
+    // If wake is 6am and sleep is 1am -> 6...23, 0.
+    // The render loop below maps HOURS.map.
+
+    const HOURS = awakeHours;
+
     // Helper for 12h format
     const format12h = (h: number) => {
         const p = h >= 12 ? 'pm' : 'am';
         const hr = h % 12 || 12;
         return `${hr}${p}`;
+    };
+
+    const isSleepTime = (h: number, m: number) => {
+        if (!state.sleepSettings?.enabled) return false;
+        const { start, end } = state.sleepSettings;
+        const [sH, sM] = start.split(':').map(Number);
+        const [eH, eM] = end.split(':').map(Number);
+        const currVal = h * 60 + m;
+        const startVal = sH * 60 + sM;
+        const endVal = eH * 60 + eM;
+        if (startVal > endVal) {
+            if (currVal >= startVal || currVal < endVal) return true;
+        } else {
+            if (currVal >= startVal && currVal < endVal) return true;
+        }
+        return false;
     };
 
     // Load existing data
@@ -166,6 +210,20 @@ function OnboardingContent() {
                 const startStr = `${start.h}:${start.m.toString().padStart(2, '0')}`;
                 const endStr = `${endH}:${endM.toString().padStart(2, '0')}`;
 
+                // Calculate Start Date (Next occurrence of this day)
+                const today = new Date();
+                const targetDayIndex = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(day);
+                let diff = targetDayIndex - today.getDay();
+                if (diff < 0) diff += 7; // If day passed this week, move to next week? 
+                // Wait, if it's today? 
+                // Let's say today is Sunday. target is Monday (1). diff = 1. Date is Tomorrow.
+                // If today is Monday. target is Monday. diff = 0. Date is Today.
+                // If today is Tuesday. target is Monday. diff = -1 -> 6. Date is next Monday.
+
+                const startDate = new Date(today);
+                startDate.setDate(today.getDate() + diff);
+                const startDateISO = startDate.toISOString().split('T')[0];
+
                 newScheduleItems.push({
                     id: crypto.randomUUID(),
                     day: day as any,
@@ -173,7 +231,9 @@ function OnboardingContent() {
                     endTime: endStr,
                     type: 'class',
                     label: className,
-                    classId: classId
+                    classId: classId,
+                    isRecurring: true,
+                    startDate: startDateISO
                 });
             }
 
@@ -323,7 +383,7 @@ function OnboardingContent() {
                     <div style={{
                         display: 'grid',
                         gridTemplateColumns: '60px repeat(5, 1fr)',
-                        gap: '2px',
+                        gap: '0',
                         userSelect: 'none',
                         touchAction: 'none'
                     }}>
@@ -350,6 +410,8 @@ function OnboardingContent() {
                                     {DAYS.map(d => {
                                         const key = `${d}-${h}:${currMin}`;
                                         const isSelected = selectedSlots.has(key);
+                                        const isSleep = isSleepTime(h, currMin);
+
                                         const existingEvent = state.schedule.find(s => {
                                             if (editClassId && s.classId === editClassId) return false;
                                             if (s.day !== d) return false;
@@ -361,32 +423,36 @@ function OnboardingContent() {
                                             return currVal >= startVal && currVal < endVal;
                                         });
 
-                                        let bg = '#f9f9f9';
-                                        let border = isSelected ? '1px solid white' : '1px solid #eee';
-                                        if (currMin === 45) border = '1px solid #ddd';
+                                        let style: React.CSSProperties = {
+                                            height: '20px',
+                                            cursor: (existingEvent || isSleep) ? 'not-allowed' : 'pointer',
+                                            borderBottom: idx === 3 ? '1px solid #ddd' : '1px solid #f0f0f0',
+                                            borderRight: '1px solid #f0f0f0',
+                                            opacity: existingEvent ? 0.5 : 1
+                                        };
 
-                                        if (existingEvent) {
+                                        if (isSleep) {
+                                            style.background = '#F3E8FF';
+                                            style.borderBottom = 'none';
+                                            style.borderRight = 'none';
+                                            style.borderLeft = 'none'; // Ensure no left border from previous cell if needed, though grid handles this.
+                                        } else if (existingEvent) {
                                             const assoc = state.classes.find(c => c.name === existingEvent.label || existingEvent.label?.includes(c.name));
-                                            bg = assoc ? assoc.color : '#ccc';
-                                            bg = bg + '40';
+                                            let bg = assoc ? assoc.color : '#ccc';
+                                            style.background = bg + '40';
                                         } else if (isSelected) {
-                                            bg = color;
+                                            style.background = color;
+                                        } else {
+                                            style.background = '#f9f9f9';
                                         }
 
                                         return (
                                             <div
                                                 key={key}
-                                                onMouseDown={() => !existingEvent && handleMouseDown(d, h, currMin)}
-                                                onMouseEnter={() => !existingEvent && handleMouseEnter(d, h, currMin)}
-                                                onClick={() => !existingEvent && toggleSlot(d, h, currMin)}
-                                                style={{
-                                                    height: '20px',
-                                                    background: bg,
-                                                    cursor: existingEvent ? 'not-allowed' : 'pointer',
-                                                    borderBottom: idx === 3 ? '1px solid #ddd' : '1px solid #f0f0f0',
-                                                    borderRight: '1px solid #f0f0f0',
-                                                    opacity: existingEvent ? 0.5 : 1
-                                                }}
+                                                onMouseDown={() => !existingEvent && !isSleep && handleMouseDown(d, h, currMin)}
+                                                onMouseEnter={() => !existingEvent && !isSleep && handleMouseEnter(d, h, currMin)}
+                                                onClick={() => !existingEvent && !isSleep && toggleSlot(d, h, currMin)}
+                                                style={style}
                                             />
                                         );
                                     })}

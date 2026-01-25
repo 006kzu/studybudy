@@ -44,7 +44,7 @@ export default function ShopPage() {
         if (selectedItem) {
             buyItem(selectedItem.name, selectedItem.price);
             equipAvatar(selectedItem.name);
-            setToastMsg({ msg: `Bought ${selectedItem.name}!`, type: 'success' });
+            setToastMsg({ msg: `${selectedItem.name} unlocked!`, type: 'success' });
             setSelectedItem(null);
         }
     };

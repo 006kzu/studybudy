@@ -191,7 +191,8 @@ export default function SchedulePage() {
                     type: 'study',
                     label: `Study ${cls.name}`,
                     classId: cls.id,
-                    isRecurring: true
+                    isRecurring: true,
+                    startDate: formatISO(getWeekDate(currentDayIndex))
                 };
                 addScheduleItem(newItem);
                 minutesNeeded -= 60;
@@ -364,7 +365,7 @@ export default function SchedulePage() {
                     padding: 0
                 }}
             >
-                <div style={{ display: 'grid', ...gridStyle, gap: '1px', background: '#f0f0f0' }}>
+                <div style={{ display: 'grid', ...gridStyle, gap: '0', background: '#f0f0f0' }}>
                     <div style={{
                         position: 'sticky',
                         top: 0,
@@ -422,7 +423,11 @@ export default function SchedulePage() {
                                     // Find existing event
                                     const event = state.schedule.find(s => {
                                         if (s.day !== d) return false;
-                                        if (s.isRecurring) {
+
+                                        // Default isRecurring to true if null/undefined
+                                        const isRecurring = s.isRecurring !== false;
+
+                                        if (isRecurring) {
                                             if (s.startDate && colDateStr < s.startDate) return false;
                                         } else {
                                             if (s.specificDate !== colDateStr) return false;
@@ -439,23 +444,35 @@ export default function SchedulePage() {
                                     let textColor = 'transparent';
                                     let label = '';
                                     let isStart = false;
+                                    let bgStyle: any = { background: '#fff' };
+                                    let borderStyle = {
+                                        borderBottom: idx === 3 ? '1px solid #ddd' : '1px solid #f9f9f9',
+                                        borderRight: '1px solid #f9f9f9'
+                                    };
 
                                     if (isSleep) {
-                                        bgColor = '#2E1A47';
+                                        bgStyle = {
+                                            background: '#F3E8FF'
+                                        };
+                                        // Remove borders for seamless look
+                                        borderStyle = {
+                                            borderBottom: 'none',
+                                            borderRight: 'none'
+                                        };
                                     } else if (isSelected) {
-                                        bgColor = '#ddd';
+                                        bgStyle = { background: '#ddd' };
                                     } else if (event) {
                                         textColor = 'white';
                                         const assoc = state.classes.find(c => c.name === event.label || event.label?.endsWith(c.name));
 
                                         if (event.type === 'block') {
-                                            bgColor = event.color || '#666';
+                                            bgStyle = { background: event.color || '#666' };
                                         } else if (assoc) {
-                                            bgColor = assoc.color;
+                                            bgStyle = { background: assoc.color };
                                         } else if (event.type === 'study') {
-                                            bgColor = 'var(--color-primary)';
+                                            bgStyle = { background: 'var(--color-primary)' };
                                         } else {
-                                            bgColor = 'var(--color-secondary)';
+                                            bgStyle = { background: 'var(--color-secondary)' };
                                         }
 
                                         const [sH, sM] = event.startTime.split(':').map(Number);
@@ -476,12 +493,11 @@ export default function SchedulePage() {
                                             onMouseEnter={() => !event && handleMouseEnter(d, h, currMin)}
                                             style={{
                                                 height: '24px',
-                                                background: bgColor,
+                                                ...bgStyle,
                                                 fontSize: '0.7rem',
                                                 padding: '2px 4px',
                                                 color: textColor,
-                                                borderBottom: idx === 3 ? '1px solid #ddd' : '1px solid #f9f9f9',
-                                                borderRight: '1px solid #f9f9f9',
+                                                ...borderStyle,
                                                 opacity: (event?.type === 'study' || event?.type === 'block') ? 0.9 : 1,
                                                 overflow: 'hidden',
                                                 whiteSpace: 'nowrap',

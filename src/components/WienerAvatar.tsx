@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import Link from 'next/link';
 import { AVATARS } from '@/constants/avatars';
 
 export default function WienerAvatar({ points, inventory = [], equippedAvatar = 'Default Dog' }: { points: number, inventory?: string[], equippedAvatar?: string }) {
@@ -24,7 +25,7 @@ export default function WienerAvatar({ points, inventory = [], equippedAvatar = 
             />
 
             {/* Stats Badge */}
-            <div style={{
+            <Link href="/stats" style={{
                 position: 'absolute',
                 bottom: '-10px',
                 left: '50%',
@@ -36,10 +37,12 @@ export default function WienerAvatar({ points, inventory = [], equippedAvatar = 
                 fontSize: '0.6rem',
                 whiteSpace: 'nowrap',
                 zIndex: 3,
-                fontFamily: 'var(--font-primary)'
+                fontFamily: 'var(--font-primary)',
+                textDecoration: 'none',
+                cursor: 'pointer'
             }}>
                 {points} Coins 💰
-            </div>
+            </Link>
         </div>
     );
 }
