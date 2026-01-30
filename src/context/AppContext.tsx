@@ -4,6 +4,9 @@ import React, { createContext, useContext, useEffect, useState, useRef } from 'r
 import { supabase } from '@/lib/supabase';
 import { User } from '@supabase/supabase-js';
 import { useRouter } from 'next/navigation';
+import { App as CapApp, URLOpenListenerEvent } from '@capacitor/app';
+import { Capacitor } from '@capacitor/core';
+import { LocalNotifications } from '@capacitor/local-notifications';
 
 // --- Types ---
 export type ClassItem = {
@@ -11,6 +14,7 @@ export type ClassItem = {
     name: string;
     weeklyGoalMinutes: number;
     color: string;
+    isArchived?: boolean;
 };
 
 export type ScheduleItem = {
@@ -48,6 +52,13 @@ type AppState = {
         start: string;
         end: string;
     };
+    notifications: {
+        studyBreaksEnabled: boolean;
+        classRemindersEnabled: boolean;
+    };
+    zenMode: boolean;
+    isPremium: boolean;
+    musicEnabled?: boolean;
 };
 
 type AppContextType = {
@@ -70,10 +81,18 @@ type AppContextType = {
     equipAvatar: (avatarName: string) => Promise<void>;
     completeOnboarding: () => Promise<void>;
     updateSleepSettings: (settings: { enabled: boolean; start: string; end: string }) => Promise<void>;
+    updateSettings: (settings: { sleepSettings?: AppState['sleepSettings']; notifications?: AppState['notifications']; zenMode?: boolean; musicEnabled?: boolean }) => Promise<void>;
+    scheduleStudyNotification: (minutes: number) => Promise<void>;
+    cancelStudyNotification: () => Promise<void>;
+    testNotification: () => Promise<void>;
     resetData: () => Promise<void>;
     signOut: () => Promise<void>;
     refreshData: () => Promise<void>;
     resetClassProgress: (classId: string) => Promise<void>;
+    archiveAllClasses: () => Promise<void>;
+    scheduleClassReminders: (minutesBefore: number) => Promise<void>;
+    cancelClassReminders: () => Promise<void>;
+    goPremium: () => Promise<void>;
 };
 
 const initialState: AppState = {
@@ -88,7 +107,13 @@ const initialState: AppState = {
         enabled: false,
         start: '22:00',
         end: '06:00'
-    }
+    },
+    notifications: {
+        studyBreaksEnabled: false,
+        classRemindersEnabled: false,
+    },
+    zenMode: false,
+    isPremium: false,
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -99,11 +124,49 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const [isLoading, setIsLoading] = useState(true);
     const isMounted = useRef(false);
     const lastFetchedUserId = useRef<string | null>(null);
+    const CACHE_DURATION = 60 * 60 * 1000; // 1 hour
+    const CACHE_KEY_PREFIX = 'study_budy_cache_';
     const router = useRouter(); // Define router
 
     // 1. Auth & Initial Load
     useEffect(() => {
         isMounted.current = true;
+
+        // Native Deep Link Handling
+        if (Capacitor.isNativePlatform()) {
+            // Initialize AdMob
+            import('@/lib/admob').then(({ AdMobService }) => {
+                AdMobService.initialize();
+            });
+
+            CapApp.addListener('appUrlOpen', async (event: URLOpenListenerEvent) => {
+                if (event.url.includes('google-auth')) {
+                    // Supabase sends tokens in the hash or query
+                    // e.g. com.studybudy.app://google-auth#access_token=...&refresh_token=...
+                    const url = new URL(event.url);
+                    const hash = url.hash.substring(1); // remove #
+                    const query = url.search.substring(1); // remove ?
+                    const params = new URLSearchParams(hash || query);
+
+                    const access_token = params.get('access_token');
+                    const refresh_token = params.get('refresh_token');
+
+                    if (access_token && refresh_token) {
+                        const { error } = await supabase.auth.setSession({
+                            access_token,
+                            refresh_token
+                        });
+                        if (!error) {
+                            console.log('Successfully restored session from Deep Link');
+                            // Router might be outside context? No, we are in App.
+                            // But we are in Context, we can't switch page easily unless we expose a navigation method?
+                            // Actually, onAuthStateChange will fire 'SIGNED_IN' and we can handle it there or just reload.
+                            // Or better, just let the state update propagate.
+                        }
+                    }
+                }
+            });
+        }
 
         const init = async () => {
             const { data: { session } } = await supabase.auth.getSession();
@@ -173,59 +236,73 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
     };
 
-    const loadRemoteData = async (userId: string) => {
+    const loadRemoteData = async (userId: string, forceRefresh: boolean = false) => {
         setIsLoading(true);
 
-        // Relaxed type to 'any' to handle PostgrestBuilder vs Promise mismatch
-        const safeFetch = async <T,>(promise: any, label: string, timeoutMs: number = 5000) => {
-            const timeoutPromise = new Promise<{ data: null; error: any }>((_, reject) =>
-                setTimeout(() => reject(new Error(`${label} timeout`)), timeoutMs)
-            );
+        // 1. Try Cache First (if not forcing refresh)
+        if (!forceRefresh) {
             try {
-                // @ts-ignore
-                return await Promise.race([promise, timeoutPromise]) as { data: T | null, error: any };
+                const cacheKey = CACHE_KEY_PREFIX + userId;
+                const cached = localStorage.getItem(cacheKey);
+                if (cached) {
+                    const { timestamp, data } = JSON.parse(cached);
+                    const age = Date.now() - timestamp;
+                    if (age < CACHE_DURATION && data) {
+                        console.log(`[AppContext] Cache Hit! Age: ${Math.round(age / 1000)}s. Skipping DB.`);
+                        setState(data);
+                        setIsLoading(false);
+                        return; // Exit early!
+                    } else {
+                        console.log(`[AppContext] Cache Found but Stale. Age: ${Math.round(age / 1000)}s. Fetching DB...`);
+                    }
+                }
             } catch (e) {
-                console.warn(`[AppContext] ${label} failed/timed-out:`, e);
-                return { data: null, error: e };
+                console.warn('[AppContext] Cache parse error', e instanceof Error ? e.message : JSON.stringify(e, null, 2));
+            }
+        }
+
+        // 2. Fetch from DB (Cache Miss or Stale)
+
+
+
+        // Helper for individual fetches to prevent one failure blocking others
+        const fetchTable = async (table: string, query: any) => {
+            try {
+                const { data, error } = await query;
+                if (error) throw error;
+                return data;
+            } catch (e: any) {
+                console.warn(`[AppContext] ${table} failed:`, e.message || JSON.stringify(e, null, 2));
+                return null; // Null indicates error
             }
         };
 
         try {
-            console.log('[AppContext] Starting parallel robust load...');
-
-            // Parallel execution: Max wait time = 5s total, not 20s.
-            const [profileRes, classesRes, scheduleRes, sessionsRes] = await Promise.all([
-                safeFetch(supabase.from('profiles').select('*').eq('id', userId).maybeSingle(), 'Profile'),
-                safeFetch(supabase.from('classes').select('*').eq('user_id', userId), 'Classes'),
-                safeFetch(supabase.from('schedule_items').select('*').eq('user_id', userId), 'Schedule'),
-                safeFetch(supabase.from('study_sessions').select('*').eq('user_id', userId), 'Sessions')
+            // Execute in parallel
+            const [profile, classes, schedule, sessions] = await Promise.all([
+                fetchTable('Profile', supabase.from('profiles').select('*').eq('id', userId).single()),
+                fetchTable('Classes', supabase.from('classes').select('*').eq('user_id', userId)),
+                fetchTable('Schedule', supabase.from('schedule_items').select('*').eq('user_id', userId)),
+                fetchTable('Sessions', supabase.from('study_sessions').select('*').eq('user_id', userId))
             ]);
 
-            const profile = profileRes.data;
-
-            console.log('[AppContext] Loaded Remote Data (Count):', {
-                profile: profileRes.data ? 'Found' : 'Null',
-                classes: (classesRes.data as any[])?.length || 0,
-                schedule: (scheduleRes.data as any[])?.length || 0,
-                sessions: (sessionsRes.data as any[])?.length || 0
-            });
-
-            const hasData = (classesRes.data as any[])?.length > 0 || (scheduleRes.data as any[])?.length > 0;
-            if (!hasData) {
-                console.warn('[AppContext] Warning: No classes or schedule items found. RLS or Sync issue?');
-                console.log('[AppContext] Resetting deduplication ref to allow retry on next Auth event.');
-                lastFetchedUserId.current = null;
-            }
+            console.log('[AppContext] Loaded Remote Data (Count):', JSON.stringify({
+                profile: profile ? 'Found' : 'Null',
+                classes: classes?.length || 0,
+                schedule: schedule?.length || 0,
+                sessions: sessions?.length || 0
+            }));
 
             // Map DB structure to AppState (safely handling nulls)
             const newState: AppState = {
-                classes: (classesRes.data as any[])?.map(c => ({
+                classes: (classes as any[])?.map(c => ({
                     id: c.id,
                     name: c.name,
                     weeklyGoalMinutes: c.weekly_goal_minutes,
-                    color: c.color
+                    color: c.color,
+                    isArchived: c.is_archived
                 })) || [],
-                schedule: (scheduleRes.data as any[])?.map(s => ({
+                schedule: (schedule as any[])?.map(s => ({
                     id: s.id,
                     day: s.day as any,
                     startTime: s.start_time,
@@ -238,7 +315,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                     startDate: s.start_date,
                     color: s.color
                 })) || [],
-                studySessions: (sessionsRes.data as any[])?.map(s => ({
+                studySessions: (sessions as any[])?.map(s => ({
                     id: s.id,
                     classId: s.class_id,
                     durationMinutes: s.duration_minutes,
@@ -249,11 +326,38 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 inventory: (profile as any)?.inventory || [],
                 equippedAvatar: (profile as any)?.equipped_avatar || 'Default Dog',
                 isOnboarded: (profile as any)?.is_onboarded || false,
-                sleepSettings: (profile as any)?.sleep_settings || initialState.sleepSettings
+                sleepSettings: (profile as any)?.sleep_settings || initialState.sleepSettings,
+                notifications: (profile as any)?.notifications || initialState.notifications,
+                zenMode: (profile as any)?.zen_mode || initialState.zenMode,
+                isPremium: (profile as any)?.is_premium || false
             };
 
             console.log('[AppContext] New State Set:', newState);
             setState(newState);
+
+            // Only cache if NO errors occurred (all fetches returned valid data or empty arrays, but not null from catch)
+            // But fetchTable returns null on error. 
+            // Profile returning null might be valid (first login). 
+            // Classes/Schedule returning null is an error.
+            const anyErrors = classes === null || schedule === null || sessions === null;
+
+            if (!anyErrors) {
+                const cacheData = {
+                    classes: newState.classes,
+                    schedule: newState.schedule,
+                    studySessions: newState.studySessions,
+                    points: newState.points,
+                    inventory: newState.inventory,
+                    equippedAvatar: newState.equippedAvatar,
+                    isOnboarded: newState.isOnboarded, // Added missing property
+                    sleepSettings: newState.sleepSettings,
+                    timestamp: Date.now()
+                };
+                localStorage.setItem(CACHE_KEY_PREFIX + userId, JSON.stringify(cacheData));
+            } else {
+                console.warn('[AppContext] Skipping cache update due to fetch errors.');
+            }
+
         } catch (error) {
             console.error('Error loading remote data (critical):', error);
         } finally {
@@ -320,10 +424,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     // 3. Modifiers (Optimistic UI + Async Sync)
     // Helper to sync specific changes if user is logged in
-    // Else sync entire state to LocalStorage
+    // Else sync entire state to LocalStorage (Guest)
+    // AND: Sync to Cache if logged in (for next load)
     useEffect(() => {
-        if (!user && !isLoading) { // Only save to local if NOT logged in
-            localStorage.setItem('study_budy_data', JSON.stringify(state));
+        if (!isLoading) {
+            if (user) {
+                // Logged In: Save to User Cache
+                const cacheKey = CACHE_KEY_PREFIX + user.id;
+                const cacheData = {
+                    timestamp: Date.now(),
+                    data: state
+                };
+                localStorage.setItem(cacheKey, JSON.stringify(cacheData));
+            } else {
+                // Guest: Save to Guest Data
+                localStorage.setItem('study_budy_data', JSON.stringify(state));
+            }
         }
     }, [state, user, isLoading]);
 
@@ -369,16 +485,52 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
 
     const removeClass = async (id: string) => {
+        // Soft Delete: Mark as archived
         setState(prev => ({
             ...prev,
-            classes: prev.classes.filter(c => c.id !== id),
+            classes: prev.classes.map(c => c.id === id ? { ...c, isArchived: true } : c),
+            // Remove from schedule locally
             schedule: prev.schedule.filter(s => s.classId !== id && s.label !== prev.classes.find(c => c.id === id)?.name)
         }));
+
         if (user) {
-            await supabase.from('classes').delete().eq('id', id).then(({ error }) => {
-                if (error) console.error(error);
+            // 1. Mark class as archived
+            await supabase.from('classes').update({ is_archived: true }).eq('id', id).then(({ error }) => {
+                if (error) console.error('Error archiving class:', error);
             });
-            // Cascade delete handles schedule items in DB
+
+            // 2. Delete future/current schedule items for this class to clean up calendar
+            // We can delete by class_id
+            await supabase.from('schedule_items').delete().eq('class_id', id).then(({ error }) => {
+                if (error) console.error('Error removing schedule items for archived class:', error);
+            });
+
+            // Also try to delete items by label just in case (legacy) - optional but good for consistency
+            // const cls = state.classes.find(c => c.id === id);
+            // if (cls) {
+            //    await supabase.from('schedule_items').delete().eq('label', cls.name).then(...)
+            // }
+        }
+    };
+
+    const archiveAllClasses = async () => {
+        console.log('[AppContext] Archiving all classes...');
+        const activeClasses = state.classes.filter(c => !c.isArchived);
+
+        // Optimistic Update
+        setState(prev => ({
+            ...prev,
+            classes: prev.classes.map(c => ({ ...c, isArchived: true })),
+            schedule: prev.schedule.filter(s => s.type !== 'class') // Remove all class schedule items
+        }));
+
+        if (user) {
+            // 1. Bulk Update Classes
+            await supabase.from('classes').update({ is_archived: true }).eq('user_id', user.id);
+
+            // 2. Bulk Delete Schedule Items (only type='class' or linked to classes)
+            // Ideally we delete where class_id is not null OR type is 'class'
+            await supabase.from('schedule_items').delete().eq('user_id', user.id).eq('type', 'class');
         }
     };
 
@@ -511,33 +663,58 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
 
     const addPoints = async (amount: number) => {
+        // Optimistic UI Update
         const newPoints = state.points + amount;
         setState(prev => ({ ...prev, points: newPoints }));
+
         if (user) {
-            await supabase.from('profiles').update({ points: newPoints }).eq('id', user.id).then(({ error }) => {
-                if (error) console.error(error);
-            });
+            // Try Secure RPC first
+            const { error: rpcError } = await supabase.rpc('add_points', { amount });
+
+            if (rpcError) {
+                console.warn('[AppContext] Secure RPC failed (likely not installed), falling back to client-update:', rpcError.message);
+                // Fallback: Client-side update (Legacy/Insecure)
+                await supabase.from('profiles').update({ points: newPoints }).eq('id', user.id);
+            }
         }
     };
 
     const removePoints = async (amount: number) => {
+        // Same logic as addPoints (negative amount via RPC or manual)
+        // Optimistic
         const newPoints = Math.max(0, state.points - amount);
         setState(prev => ({ ...prev, points: newPoints }));
+
         if (user) {
-            await supabase.from('profiles').update({ points: newPoints }).eq('id', user.id).then(({ error }) => {
-                if (error) console.error(error);
-            });
+            const { error: rpcError } = await supabase.rpc('add_points', { amount: -amount });
+            if (rpcError) {
+                await supabase.from('profiles').update({ points: newPoints }).eq('id', user.id);
+            }
         }
     };
 
     const buyItem = async (itemName: string, cost: number) => {
+        // Optimistic UI
         const newPoints = Math.max(0, state.points - cost);
         const newInventory = [...(state.inventory || []), itemName];
         setState(prev => ({ ...prev, points: newPoints, inventory: newInventory }));
+
         if (user) {
-            await supabase.from('profiles').update({ points: newPoints, inventory: newInventory }).eq('id', user.id).then(({ error }) => {
-                if (error) console.error(error);
-            });
+            // Try Secure RPC
+            const { data, error: rpcError } = await supabase.rpc('purchase_item', { item_name: itemName, cost });
+
+            if (rpcError) {
+                console.warn('[AppContext] Secure RPC purchase failed, falling back:', rpcError.message);
+                // Fallback
+                await supabase.from('profiles').update({ points: newPoints, inventory: newInventory }).eq('id', user.id);
+            } else if (data === false) {
+                // RPC returned false (insufficient funds on server)
+                // We should revert the optimistic update here!
+                console.error('[AppContext] Secure Purchase Rejected by Server (Insufficient Funds)');
+                // Revert state (fetch fresh)
+                await refreshData();
+                alert('Transaction Rejected: Insufficient Server-Side Funds. Stop hacking! 😉');
+            }
         }
     };
 
@@ -560,12 +737,188 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
 
     const updateSleepSettings = async (settings: { enabled: boolean; start: string; end: string }) => {
-        setState(prev => ({ ...prev, sleepSettings: settings }));
-        if (user) {
-            await supabase.from('profiles').update({ sleep_settings: settings }).eq('id', user.id).then(({ error }) => {
-                if (error) console.error(error);
-            });
+        // Wrapper for new generic method
+        await updateSettings({ sleepSettings: settings });
+    };
+
+    const updateSettings = async (settings: { sleepSettings?: AppState['sleepSettings']; notifications?: AppState['notifications']; zenMode?: boolean }) => {
+        setState(prev => {
+            const next = { ...prev };
+            if (settings.sleepSettings) next.sleepSettings = settings.sleepSettings;
+            if (settings.notifications) next.notifications = settings.notifications;
+            if (settings.zenMode !== undefined) next.zenMode = settings.zenMode;
+
+            localStorage.setItem('study_budy_data', JSON.stringify({
+                classes: next.classes,
+                schedule: next.schedule,
+                studySessions: next.studySessions,
+                points: next.points,
+                inventory: next.inventory,
+                equippedAvatar: next.equippedAvatar,
+                isOnboarded: next.isOnboarded,
+                sleepSettings: next.sleepSettings,
+                notifications: next.notifications,
+                zenMode: next.zenMode
+            }));
+
+            return next;
+        });
+
+        if (settings.notifications?.studyBreaksEnabled || settings.notifications?.classRemindersEnabled) {
+            try {
+                const perm = await LocalNotifications.requestPermissions();
+                if (perm.display !== 'granted') {
+                    console.warn('Notification permission denied');
+                }
+            } catch (e) {
+                console.error('Error requesting notification permissions:', e);
+            }
         }
+
+        if (user) {
+            const updates: any = {};
+            if (settings.sleepSettings) updates.sleep_settings = settings.sleepSettings;
+            // Note: If we had a 'settings' column, we would update it here.
+            // For now, notification settings are Local/Guest preferred or need schema update.
+            // We'll trust LocalStorage/Cache for general persistence of preferences if DB column missing.
+
+            if (Object.keys(updates).length > 0) {
+                await supabase.from('profiles').update(updates).eq('id', user.id).then(({ error }) => {
+                    if (error) console.error(error);
+                });
+            }
+        }
+    };
+
+    const scheduleStudyNotification = async (minutes: number) => {
+        // 1. Check State
+        if (!state.notifications?.studyBreaksEnabled) {
+            console.warn('[AppContext] Study Break Notifications disabled in settings, skipping schedule.');
+            return;
+        }
+
+        try {
+            // 2. Check Native Permissions
+            let perm = await LocalNotifications.checkPermissions();
+            if (perm.display !== 'granted') {
+                perm = await LocalNotifications.requestPermissions();
+                if (perm.display !== 'granted') {
+                    console.warn('[AppContext] Notification permission not granted by OS.');
+                    return;
+                }
+            }
+
+            // 3. Schedule
+            console.log(`[AppContext] Scheduling notification for ${minutes} minutes from now.`);
+            await LocalNotifications.cancel({ notifications: [{ id: 1001 }] });
+
+            const endAt = new Date(Date.now() + minutes * 60 * 1000);
+            await LocalNotifications.schedule({
+                notifications: [{
+                    id: 1001,
+                    title: "Study Session Complete! 🎉",
+                    body: "Time for a break. Great work!",
+                    schedule: { at: endAt },
+                    sound: 'beep.caf', // Default sound
+                }]
+            });
+            console.log('[AppContext] Notification scheduled successfully for:', endAt.toLocaleTimeString());
+        } catch (e) {
+            console.error('[AppContext] Error scheduling notification:', e);
+        }
+    };
+
+    const testNotification = async () => {
+        console.log('[AppContext] Testing notification...');
+        await scheduleStudyNotification(0.1); // 6 seconds
+        alert('Test notification scheduled for 6 seconds from now. Please put the app in background!');
+    };
+
+    const cancelStudyNotification = async () => {
+        try {
+            await LocalNotifications.cancel({ notifications: [{ id: 1001 }] });
+        } catch (e) { console.error(e); }
+    };
+
+
+
+    const scheduleClassReminders = async (minutesBefore: number) => {
+        if (!state.notifications?.classRemindersEnabled) {
+            console.warn('[AppContext] Notifications (Class) disabled, skipping class reminders.');
+            return;
+        }
+
+        try {
+            // Permission check
+            let perm = await LocalNotifications.checkPermissions();
+            if (perm.display !== 'granted') {
+                perm = await LocalNotifications.requestPermissions();
+                if (perm.display !== 'granted') return;
+            }
+
+            // Cancel existing class reminders (ids 10000+)
+            const pending = await LocalNotifications.getPending();
+            const classNotifs = pending.notifications.filter(n => n.id >= 10000);
+            if (classNotifs.length > 0) {
+                await LocalNotifications.cancel({ notifications: classNotifs });
+            }
+
+            const notifs = [];
+            const dayMap: Record<string, number> = { 'Sun': 1, 'Mon': 2, 'Tue': 3, 'Wed': 4, 'Thu': 5, 'Fri': 6, 'Sat': 7 };
+
+            // Iterate class schedule
+            for (const item of state.schedule) {
+                if (item.type !== 'class') continue;
+
+                const [h, m] = item.startTime.split(':').map(Number);
+                const classTime = new Date();
+                classTime.setHours(h, m, 0, 0);
+
+                // Subtract minutesBefore
+                const remindTime = new Date(classTime.getTime() - minutesBefore * 60 * 1000);
+
+                // Construct schedule object
+                // Capacitor LocalNotifications schedule: { on: { weekday: n, hour: h, minute: m } }
+                const weekday = dayMap[item.day];
+
+                // Generate unique ID based on a hash of the item ID or random
+                // Let's use a simple counter + offset
+                const id = 10000 + Math.floor(Math.random() * 90000);
+
+                notifs.push({
+                    id: id,
+                    title: `Upcoming Class: ${item.label}`,
+                    body: `Class starts in ${minutesBefore} minutes!`,
+                    schedule: {
+                        on: {
+                            weekday: weekday,
+                            hour: remindTime.getHours(),
+                            minute: remindTime.getMinutes()
+                        }
+                    },
+                    sound: 'beep.caf',
+                    extra: { classId: item.classId }
+                });
+            }
+
+            if (notifs.length > 0) {
+                await LocalNotifications.schedule({ notifications: notifs });
+                console.log(`[AppContext] Scheduled ${notifs.length} class reminders.`);
+            }
+
+        } catch (e) {
+            console.error('[AppContext] Error scheduling class reminders:', e);
+        }
+    };
+
+    const cancelClassReminders = async () => {
+        try {
+            const pending = await LocalNotifications.getPending();
+            const classNotifs = pending.notifications.filter(n => n.id >= 10000);
+            if (classNotifs.length > 0) {
+                await LocalNotifications.cancel({ notifications: classNotifs });
+            }
+        } catch (e) { console.error(e); }
     };
 
     const resetData = async () => {
@@ -591,7 +944,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const refreshData = async () => {
         if (user) {
             console.log('[AppContext] Manual refresh triggered');
-            await loadRemoteData(user.id);
+            await loadRemoteData(user.id, true);
         } else {
             console.log('[AppContext] Manual refresh skipped (no user)');
             loadLocalData();
@@ -625,6 +978,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
 
 
+    const goPremium = async () => {
+        const BONUS_COINS = 25000;
+        const newPoints = state.points + BONUS_COINS;
+
+        setState(prev => ({ ...prev, isPremium: true, points: newPoints }));
+
+        // Persist
+        if (user) {
+            await supabase.from('profiles').update({ is_premium: true, points: newPoints }).eq('id', user.id).then(({ error }) => {
+                if (error) console.error('Error upgrading to premium:', error);
+            });
+        }
+
+        // Also update local storage immediately for guest/cache
+        const nextState = { ...state, isPremium: true, points: newPoints };
+        localStorage.setItem('study_budy_data', JSON.stringify(nextState));
+    };
+
     return (
         <AppContext.Provider
             value={{
@@ -646,11 +1017,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 buyItem,
                 equipAvatar,
                 completeOnboarding,
-                updateSleepSettings,
+                updateSettings,
+                scheduleStudyNotification,
+                cancelStudyNotification,
+                testNotification,
+                updateSleepSettings, // Deprecated but kept for now to avoid breaking references elsewhere until refactored
                 resetData,
                 signOut,
                 refreshData,
-                resetClassProgress
+                resetClassProgress,
+                archiveAllClasses,
+                scheduleClassReminders,
+                cancelClassReminders,
+                goPremium
             }}
         >
             {children}

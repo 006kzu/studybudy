@@ -6,73 +6,77 @@ export type AvatarItem = {
 };
 
 export const AVATARS: AvatarItem[] = [
-    // Originals
+    // Free
     { name: 'Default Dog', price: 0, icon: '🐕', filename: '/assets/idle.png' },
-    { name: 'Cool Dog', price: 500, icon: '😎', filename: '/assets/avatar_cool.png' },
-    { name: 'Fast Dog', price: 750, icon: '👟', filename: '/assets/avatar_fast.png' },
-    { name: 'Gorilla', price: 2000, icon: '🦍', filename: '/assets/avatar_gorilla.png' },
-    { name: 'Elephant', price: 5000, icon: '🐘', filename: '/assets/avatar_elephant.png' },
 
-    // Animals
-    { name: 'Cat', price: 1000, icon: '🐱', filename: '/assets/avatar_cat.png' },
-    { name: 'Lion', price: 2500, icon: '🦁', filename: '/assets/avatar_lion.png' },
-    { name: 'Tiger', price: 2500, icon: '🐯', filename: '/assets/avatar_tiger.png' },
-    { name: 'Bear', price: 2200, icon: '🐻', filename: '/assets/avatar_bear.png' },
-    { name: 'Panda', price: 3000, icon: '🐼', filename: '/assets/avatar_panda.png' },
-    { name: 'Fox', price: 1500, icon: '🦊', filename: '/assets/avatar_fox.png' },
-    { name: 'Wolf', price: 1800, icon: '🐺', filename: '/assets/avatar_wolf.png' },
-    { name: 'Bunny', price: 800, icon: '🐰', filename: '/assets/avatar_bunny.png' },
-    { name: 'Hamster', price: 600, icon: '🐹', filename: '/assets/avatar_hamster.png' },
-    { name: 'Mouse', price: 500, icon: '🐭', filename: '/assets/avatar_mouse.png' },
-    { name: 'Pig', price: 1200, icon: '🐷', filename: '/assets/avatar_pig.png' },
-    { name: 'Cow', price: 1500, icon: '🐮', filename: '/assets/avatar_cow.png' },
-    { name: 'Sheep', price: 1400, icon: '🐑', filename: '/assets/avatar_sheep.png' },
-    { name: 'Penguin', price: 2000, icon: '🐧', filename: '/assets/avatar_penguin.png' },
-    { name: 'Duck', price: 900, icon: '🦆', filename: '/assets/avatar_duck.png' },
-    { name: 'Frog', price: 1100, icon: '🐸', filename: '/assets/avatar_frog.png' },
-    { name: 'Turtle', price: 1600, icon: '🐢', filename: '/assets/avatar_turtle.png' },
-    { name: 'Snake', price: 1300, icon: '🐍', filename: '/assets/avatar_snake.png' },
-    { name: 'Crocodile', price: 2800, icon: '🐊', filename: '/assets/avatar_crocodile.png' },
-    { name: 'Shark', price: 3500, icon: '🦈', filename: '/assets/avatar_shark.png' },
+    // Tier 1 (Starter)
+    { name: 'Mouse', price: 1000, icon: '🐭', filename: '/assets/avatar_mouse.png' },
+    { name: 'Bunny', price: 1500, icon: '🐰', filename: '/assets/avatar_bunny.png' },
+    { name: 'Cat', price: 2000, icon: '🐱', filename: '/assets/avatar_cat.png' },
+    { name: 'Hamster', price: 2500, icon: '🐹', filename: '/assets/avatar_hamster.png' },
+    { name: 'Cool Dog', price: 3000, icon: '😎', filename: '/assets/avatar_cool.png' },
 
-    // Fantasy
-    { name: 'Dragon', price: 10000, icon: '🐉', filename: '/assets/avatar_dragon.png' },
-    { name: 'Unicorn', price: 8000, icon: '🦄', filename: '/assets/avatar_unicorn.png' },
-    { name: 'Alien', price: 5000, icon: '👽', filename: '/assets/avatar_alien.png' },
-    { name: 'Robot', price: 4500, icon: '🤖', filename: '/assets/avatar_robot.png' },
-    { name: 'Zombie', price: 3000, icon: '🧟', filename: '/assets/avatar_zombie.png' },
-    { name: 'Skeleton', price: 2500, icon: '💀', filename: '/assets/avatar_skeleton.png' },
-    { name: 'Ghost', price: 2000, icon: '👻', filename: '/assets/avatar_ghost.png' },
-    { name: 'Vampire', price: 4000, icon: '🧛', filename: '/assets/avatar_vampire.png' },
-    { name: 'Ninja', price: 4000, icon: '🥷', filename: '/assets/avatar_ninja.png' },
-    { name: 'Wizard', price: 6000, icon: '🧙', filename: '/assets/avatar_wizard.png' },
+    // Tier 2 (Common)
+    { name: 'Duck', price: 5000, icon: '🦆', filename: '/assets/avatar_duck.png' },
+    { name: 'Fast Dog', price: 6000, icon: '👟', filename: '/assets/avatar_fast.png' },
+    { name: 'Frog', price: 7000, icon: '🐸', filename: '/assets/avatar_frog.png' },
+    { name: 'Clown', price: 8000, icon: '🤡', filename: '/assets/avatar_clown.png' },
+    { name: 'Pig', price: 9000, icon: '🐷', filename: '/assets/avatar_pig.png' },
+    { name: 'Snake', price: 10000, icon: '🐍', filename: '/assets/avatar_snake.png' },
+    { name: 'Pumpkin', price: 11000, icon: '🎃', filename: '/assets/avatar_pumpkin.png' },
+    { name: 'Sheep', price: 12000, icon: '🐑', filename: '/assets/avatar_sheep.png' },
+    { name: 'Fox', price: 14000, icon: '🦊', filename: '/assets/avatar_fox.png' },
+    { name: 'Cow', price: 15000, icon: '🐮', filename: '/assets/avatar_cow.png' },
 
-    // Costumed Dogs (or just cool characters)
-    { name: 'Astronaut', price: 7000, icon: '👨‍🚀', filename: '/assets/avatar_astronaut.png' },
-    { name: 'Pirate', price: 3500, icon: '🏴‍☠️', filename: '/assets/avatar_pirate.png' },
-    { name: 'King', price: 9000, icon: '👑', filename: '/assets/avatar_king.png' },
-    { name: 'Queen', price: 9000, icon: '👸', filename: '/assets/avatar_queen.png' },
-    { name: 'Chef', price: 1500, icon: '👨‍🍳', filename: '/assets/avatar_chef.png' },
-    { name: 'Doctor', price: 3000, icon: '👨‍⚕️', filename: '/assets/avatar_doctor.png' },
-    { name: 'Police', price: 2500, icon: '👮', filename: '/assets/avatar_police.png' },
-    { name: 'Firefighter', price: 2800, icon: '👨‍🚒', filename: '/assets/avatar_firefighter.png' },
-    { name: 'Cowboy', price: 3200, icon: '🤠', filename: '/assets/avatar_cowboy.png' },
-    { name: 'Clown', price: 1000, icon: '🤡', filename: '/assets/avatar_clown.png' },
+    // Tier 3 (Uncommon)
+    { name: 'Chef', price: 20000, icon: '👨‍🍳', filename: '/assets/avatar_chef.png' },
+    { name: 'Snowman', price: 22000, icon: '⛄', filename: '/assets/avatar_snowman.png' },
+    { name: 'Turtle', price: 24000, icon: '🐢', filename: '/assets/avatar_turtle.png' },
+    { name: 'Cactus', price: 26000, icon: '🌵', filename: '/assets/avatar_cactus.png' },
+    { name: 'Ghost', price: 28000, icon: '👻', filename: '/assets/avatar_ghost.png' },
+    { name: 'Penguin', price: 30000, icon: '🐧', filename: '/assets/avatar_penguin.png' },
+    { name: 'Wolf', price: 35000, icon: '🐺', filename: '/assets/avatar_wolf.png' },
+    { name: 'Gorilla', price: 40000, icon: '🦍', filename: '/assets/avatar_gorilla.png' },
 
-    // Misc
-    { name: 'Snowman', price: 1500, icon: '⛄', filename: '/assets/avatar_snowman.png' },
-    { name: 'Pumpkin', price: 1200, icon: '🎃', filename: '/assets/avatar_pumpkin.png' },
-    { name: 'Cactus', price: 1800, icon: '🌵', filename: '/assets/avatar_cactus.png' },
-    { name: 'Hotdog', price: 5000, icon: '🌭', filename: '/assets/avatar_hotdog.png' },
-    { name: 'Burger', price: 4000, icon: '🍔', filename: '/assets/avatar_burger.png' },
-    { name: 'Pizza', price: 4500, icon: '🍕', filename: '/assets/avatar_pizza.png' },
-    { name: 'T-Rex', price: 8500, icon: '🦖', filename: '/assets/avatar_trex.png' },
+    // Tier 4 (Rare)
+    { name: 'Bear', price: 50000, icon: '🐻', filename: '/assets/avatar_bear.png' },
+    { name: 'Lion', price: 60000, icon: '🦁', filename: '/assets/avatar_lion.png' },
+    { name: 'Tiger', price: 65000, icon: '🐯', filename: '/assets/avatar_tiger.png' },
+    { name: 'Skeleton', price: 70000, icon: '💀', filename: '/assets/avatar_skeleton.png' },
+    { name: 'Police', price: 75000, icon: '👮', filename: '/assets/avatar_police.png' },
+    { name: 'Cowboy', price: 80000, icon: '🤠', filename: '/assets/avatar_cowboy.png' },
+    { name: 'Doctor', price: 85000, icon: '👨‍⚕️', filename: '/assets/avatar_doctor.png' },
+    { name: 'Firefighter', price: 90000, icon: '👨‍🚒', filename: '/assets/avatar_firefighter.png' },
 
-    // Legendary
-    { name: 'Diamond Dog', price: 50000, icon: '💎', filename: '/assets/avatar_diamond_dog.png' },
-    { name: 'Rainbow Unicorn', price: 75000, icon: '🌈', filename: '/assets/avatar_rainbow_unicorn.png' },
-    { name: 'Phoenix', price: 100000, icon: '🔥', filename: '/assets/avatar_phoenix.png' },
+    // Tier 5 (Epic)
+    { name: 'Crocodile', price: 100000, icon: '🐊', filename: '/assets/avatar_crocodile.png' },
+    { name: 'Panda', price: 110000, icon: '🐼', filename: '/assets/avatar_panda.png' },
+    { name: 'Zombie', price: 120000, icon: '🧟', filename: '/assets/avatar_zombie.png' },
+    { name: 'Pirate', price: 130000, icon: '🏴‍☠️', filename: '/assets/avatar_pirate.png' },
+    { name: 'Shark', price: 140000, icon: '🦈', filename: '/assets/avatar_shark.png' },
+    { name: 'Burger', price: 150000, icon: '🍔', filename: '/assets/avatar_burger.png' },
+    { name: 'Vampire', price: 175000, icon: '🧛', filename: '/assets/avatar_vampire.png' },
+    { name: 'Ninja', price: 200000, icon: '🥷', filename: '/assets/avatar_ninja.png' },
+    { name: 'Pizza', price: 225000, icon: '🍕', filename: '/assets/avatar_pizza.png' },
+    { name: 'Robot', price: 250000, icon: '🤖', filename: '/assets/avatar_robot.png' },
 
-    // God Tier
+    // Tier 6 (Legendary)
+    { name: 'Elephant', price: 300000, icon: '🐘', filename: '/assets/avatar_elephant.png' },
+    { name: 'Alien', price: 350000, icon: '👽', filename: '/assets/avatar_alien.png' },
+    { name: 'Hotdog', price: 400000, icon: '🌭', filename: '/assets/avatar_hotdog.png' },
+    { name: 'Unicorn', price: 450000, icon: '🦄', filename: '/assets/avatar_unicorn.png' },
+    { name: 'Astronaut', price: 500000, icon: '👨‍🚀', filename: '/assets/avatar_astronaut.png' },
+    { name: 'T-Rex', price: 600000, icon: '🦖', filename: '/assets/avatar_trex.png' },
+    { name: 'Wizard', price: 700000, icon: '🧙', filename: '/assets/avatar_wizard.png' },
+    { name: 'Dragon', price: 800000, icon: '🐉', filename: '/assets/avatar_dragon.png' },
+
+    // Tier 7 (Mythic)
+    { name: 'King', price: 900000, icon: '👑', filename: '/assets/avatar_king.png' },
+    { name: 'Queen', price: 900000, icon: '👸', filename: '/assets/avatar_queen.png' },
+    { name: 'Diamond Dog', price: 900000, icon: '💎', filename: '/assets/avatar_diamond_dog.png' },
+    { name: 'Rainbow Unicorn', price: 950000, icon: '🌈', filename: '/assets/avatar_rainbow_unicorn.png' },
+    { name: 'Phoenix', price: 999999, icon: '🔥', filename: '/assets/avatar_phoenix.png' },
+
+    // Tier 8 (God)
     { name: 'Golden Munchkin Cat', price: 1000000, icon: '✨', filename: '/assets/avatar_golden_munchkin.png' }
 ];

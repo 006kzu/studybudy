@@ -1,20 +1,31 @@
 :root {
-  /* Brand Colors */
-  --color-primary: #FF7E36; /* Wiener Dog Orange */
-  --color-primary-dark: #E66019;
-  --color-secondary: #4A90E2; /* Study Blue */
-  --color-accent: #FFD700; /* Gold for Win/Points */
+  /* Brand Colors - Earth Tones */
+  --color-primary: #564535;
+  /* Mocha Brown */
+  --color-primary-dark: #47423F;
+  /* Dark Coffee */
+  --color-secondary: #7F7269;
+  /* Taupe */
+  --color-accent: #C0B0A9;
+  /* Sand */
 
   /* Neutral Colors */
-  --color-background: #FAFAFA;
+  --color-background: #D9CBC2;
+  /* LIGHTEST (Oat Milk) - Main Background */
   --color-surface: #FFFFFF;
-  --color-text-main: #1A1A1A;
-  --color-text-secondary: #666666;
-  --color-border: #E5E5E5;
+  /* White cards for contrast */
+  --color-text-main: #47423F;
+  /* DARKEST (Dark Coffee) - Main Text */
+  --color-text-secondary: #7F7269;
+  /* Taupe - Secondary Text */
+  --color-border: #C0B0A9;
+  /* Sand - Borders */
 
   /* State Colors */
-  --color-success: #34C759;
-  --color-error: #FF3B30;
+  --color-success: #564535;
+  /* Mocha */
+  --color-error: #A3958C;
+  /* Mushroom Pink */
 
   /* Spacing */
   --spacing-xs: 4px;
@@ -26,26 +37,18 @@
 
   /* Radius */
   --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 20px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
   --radius-full: 9999px;
 
-  /* Shadows */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.05);
-  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.05);
-  --shadow-float: 0 8px 30px rgba(0, 0, 0, 0.12);
+  /* Shadows - Warm & Soft */
+  --shadow-sm: 0 2px 4px rgba(86, 69, 53, 0.05);
+  --shadow-md: 0 8px 16px rgba(86, 69, 53, 0.08);
+  --shadow-lg: 0 16px 32px rgba(86, 69, 53, 0.12);
+  --shadow-float: 0 20px 40px rgba(86, 69, 53, 0.2);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-background: #121212;
-    --color-surface: #1E1E1E;
-    --color-text-main: #FFFFFF;
-    --color-text-secondary: #A0A0A0;
-    --color-border: #333333;
-  }
-}
+
 
 * {
   box-sizing: border-box;
@@ -55,12 +58,17 @@
 
 html,
 body {
+  width: 100%;
+  height: 100%;
   max-width: 100vw;
   overflow-x: hidden;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Oxygen, Ubuntu, Cantarell, Fira Sans, Droid Sans, Helvetica Neue, sans-serif;
   background-color: var(--color-background);
   color: var(--color-text-main);
   -webkit-font-smoothing: antialiased;
+  -webkit-overflow-scrolling: touch;
+
+  /* Safe Area Handling handled per-page or via utility classes */
 }
 
 a {
@@ -70,7 +78,8 @@ a {
 
 /* Utilities */
 .container {
-  max-width: 600px; /* Mobile focused max width */
+  max-width: 600px;
+  /* Mobile focused max width */
   margin: 0 auto;
   padding: var(--spacing-md);
   min-height: 100vh;
@@ -115,10 +124,29 @@ a {
   margin-bottom: var(--spacing-md);
 }
 
-.text-center { text-align: center; }
-.text-h1 { font-size: 2rem; font-weight: 800; margin-bottom: var(--spacing-sm); }
-.text-h2 { font-size: 1.5rem; font-weight: 700; margin-bottom: var(--spacing-sm); }
-.text-body { font-size: 1rem; line-height: 1.5; color: var(--color-text-secondary); }
+.text-center {
+  text-align: center;
+}
+
+.text-h1 {
+  font-size: 2rem;
+  font-weight: 800;
+  margin-bottom: var(--spacing-sm);
+  color: var(--color-primary);
+}
+
+.text-h2 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin-bottom: var(--spacing-sm);
+  color: var(--color-primary);
+}
+
+.text-body {
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
 
 /* Animation Utility */
 .animate-fade-in {
@@ -126,6 +154,13 @@ a {
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

@@ -18,24 +18,27 @@ print(f"Scanning {DIRECTORY} for PNGs...")
 # I'll rely on a list of known new files.
 
 TARGETS = [
-    "avatar_golden_munchkin.png",
-    "avatar_diamond_dog.png",
-    "avatar_rainbow_unicorn.png",
-    "avatar_phoenix.png",
-    "avatar_sheep.png",
-    "avatar_penguin.png",
-    "avatar_duck.png",
-    "avatar_frog.png",
-    "avatar_turtle.png",
-    "avatar_snake.png",
-    "avatar_crocodile.png",
-    "avatar_shark.png",
-    "avatar_dragon.png",
-    "avatar_unicorn.png",
-    "avatar_alien.png",
-    "avatar_robot.png",
-    "avatar_zombie.png",
-    "avatar_skeleton.png"
+    "avatar_ghost.png",
+    "avatar_vampire.png",
+    "avatar_ninja.png",
+    "avatar_wizard.png",
+    "avatar_astronaut.png",
+    "avatar_pirate.png",
+    "avatar_king.png",
+    "avatar_queen.png",
+    "avatar_chef.png",
+    "avatar_doctor.png",
+    "avatar_police.png",
+    "avatar_firefighter.png",
+    "avatar_cowboy.png",
+    "avatar_clown.png",
+    "avatar_snowman.png",
+    "avatar_pumpkin.png",
+    "avatar_cactus.png",
+    "avatar_hotdog.png",
+    "avatar_burger.png",
+    "avatar_pizza.png",
+    "avatar_trex.png"
 ]
 
 for filename in os.listdir(DIRECTORY):

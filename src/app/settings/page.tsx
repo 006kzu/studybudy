@@ -1,275 +1,379 @@
 'use client';
 
 import { useApp } from '@/context/AppContext';
-import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 import Link from 'next/link';
-import { useState, useEffect } from 'react';
+
+// ...
 import Modal from '@/components/Modal';
 
 export default function SettingsPage() {
-    const { clearSchedule, resetData, addPoints, state, updateSleepSettings, user, signOut, refreshData } = useApp();
-    const router = useRouter();
+    const { state, updateSettings, testNotification, signOut, user, archiveAllClasses, scheduleClassReminders, cancelClassReminders, goPremium } = useApp();
+    const [showSemesterModal, setShowSemesterModal] = useState(false);
 
-    const [showConfirm, setShowConfirm] = useState(false);
-    const [showResetConfirm, setShowResetConfirm] = useState(false);
+    // Local state for UI feedback before persisting (or direct persist if fast enough)
+    // We'll assume updateSettings persists to Context/LocalStorage
 
-    // Sleep Settings State
-    const [showSleepModal, setShowSleepModal] = useState(false);
-    const [sleepEnabled, setSleepEnabled] = useState(false);
-    const [bedtime, setBedtime] = useState('22:00');
-    const [waketime, setWaketime] = useState('06:00');
-
-    // Load initial sleep settings when modal opens (or on mount/change)
-    useEffect(() => {
-        if (state.sleepSettings) {
-            setSleepEnabled(state.sleepSettings.enabled);
-            setBedtime(state.sleepSettings.start);
-            setWaketime(state.sleepSettings.end);
-        }
-    }, [state.sleepSettings, showSleepModal]);
-
-    const handleClearSchedule = () => {
-        clearSchedule();
-        setShowConfirm(false);
-        alert('Schedule cleared! Good luck with your new semester.');
-        router.push('/dashboard');
-    };
-
-    const handleResetData = () => {
-        resetData();
-        router.push('/onboarding');
-    };
-
-    const handleLogout = async () => {
-        await signOut();
-        window.location.href = '/login';
-    };
-
-    const saveSleepSettings = () => {
-        updateSleepSettings({
-            enabled: sleepEnabled,
-            start: bedtime,
-            end: waketime
+    const toggleSleep = () => {
+        const current = state.sleepSettings || { enabled: false, start: '22:00', end: '06:00' };
+        updateSettings({
+            sleepSettings: {
+                ...current,
+                enabled: !current.enabled
+            }
         });
-        setShowSleepModal(false);
     };
+
+
 
     return (
-        <main className="container">
-            <header style={{ display: 'flex', alignItems: 'center', marginBottom: '24px', gap: '16px' }}>
+        <main className="container" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 16px)' }}>
+            <header style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '24px' }}>
                 <Link href="/dashboard" style={{ fontSize: '1.5rem', textDecoration: 'none' }}>
-                    🔙
+                    ←
                 </Link>
-                <h1 className="text-h1">Settings</h1>
+                <h1 className="text-h1" style={{ margin: 0 }}>Settings</h1>
             </header>
 
-            <section className="card" style={{ marginBottom: '24px' }}>
-                <h2 className="text-h2">Account ☁️</h2>
-                {user ? (
+            {/* Premium Upsell Card */}
+            {!state.isPremium && (
+                <div className="card" style={{
+                    background: 'linear-gradient(135deg, #FFD700 0%, #FDB931 100%)',
+                    color: '#5e4002',
+                    border: 'none',
+                    marginBottom: '24px'
+                }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                            <h2 className="text-h2" style={{ color: '#5e4002', margin: 0 }}>Go Premium 💎</h2>
+                            <p style={{ margin: '4px 0 0 0', fontSize: '0.9rem', opacity: 0.9 }}>
+                                Remove ads & support the developer.
+                            </p>
+                        </div>
+                        <button
+                            className="btn"
+                            style={{
+                                background: 'white',
+                                color: '#5e4002',
+                                border: 'none',
+                                fontWeight: 'bold',
+                                boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                            }}
+                            onClick={() => {
+                                if (confirm("Purchase Premium for $4.99? (Mock)")) {
+                                    goPremium?.();
+                                }
+                            }}
+                        >
+                            $4.99
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            <div className="card">
+                <h2 className="text-h2">🔔 Notifications</h2>
+
+
+                {/* Study Break Alerts */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 0', borderBottom: '1px solid #eee' }}>
                     <div>
-                        <p className="text-body" style={{ marginBottom: '16px' }}>
-                            Logged in as: <strong>{user.email}</strong>
-                        </p>
-                        <p className="text-body" style={{ fontSize: '0.75rem', color: '#999', fontFamily: 'monospace', marginBottom: '16px' }}>
-                            ID: {user.id}
-                        </p>
-                        <div style={{ display: 'flex', gap: '8px' }}>
-                            <button onClick={handleLogout} className="btn btn-secondary">
-                                Log Out
-                            </button>
-                            <button onClick={() => refreshData().then(() => alert('Data Refreshed! Check Console.'))} className="btn btn-primary">
-                                🔄 Force Sync
-                            </button>
+                        <div style={{ fontWeight: 600, fontSize: '1rem' }}>Study Break Alerts</div>
+                        <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
+                            Notify me when my timer ends.
                         </div>
                     </div>
-                ) : (
-                    <div>
-                        <p className="text-body" style={{ marginBottom: '16px' }}>
-                            Sign in to save your progress and sync across devices.
-                        </p>
-                        <Link href="/login" className="btn btn-primary">
-                            Login / Sign Up
-                        </Link>
-                    </div>
-                )}
-            </section>
-
-            <section className="card" style={{ marginBottom: '24px' }}>
-                <h2 className="text-h2">Sleep Schedule 😴</h2>
-                <p className="text-body" style={{ marginBottom: '16px' }}>
-                    Configure your "Melatonin Mode" hours to prevent scheduling classes during sleep time.
-                </p>
-                <button
-                    onClick={() => setShowSleepModal(true)}
-                    className="btn btn-primary"
-                    style={{ width: '100%' }}
-                >
-                    Edit Sleep Schedule
-                </button>
-            </section>
-
-            <section className="card" style={{ marginBottom: '24px' }}>
-                <h2 className="text-h2">Semester Management</h2>
-                <p className="text-body" style={{ marginBottom: '16px' }}>
-                    Finished your semester? You can clear your entire schedule to start fresh.
-                    This will remove all class times and study blocks. Your classes and points will remain.
-                </p>
-
-                <button
-                    onClick={() => setShowConfirm(true)}
-                    className="btn"
-                    style={{ background: 'var(--color-error)', color: 'white' }}
-                >
-                    Finished Semester? Clear Schedule
-                </button>
-            </section>
-
-            <section className="card" style={{ marginBottom: '24px' }}>
-                <h2 className="text-h2">Testing Zone 🧪</h2>
-                <p className="text-body" style={{ marginBottom: '16px' }}>
-                    Need some resources to test the shop?
-                </p>
-                <button
-                    onClick={() => {
-                        addPoints(1000000);
-                        alert('Granted 1,000,000 Inches! 🌭 Your wiener is massive!');
-                    }}
-                    className="btn btn-secondary"
-                >
-                    💰 Grant 1,000,000 Inches
-                </button>
-            </section>
-
-            <section className="card">
-                <h2 className="text-h2">App Data</h2>
-                <p className="text-body" style={{ marginBottom: '16px', fontSize: '0.9rem', opacity: 0.8 }}>
-                    Need a complete factory reset? This will delete all classes, points, and history.
-                </p>
-                <button
-                    onClick={() => setShowResetConfirm(true)}
-                    style={{ color: 'var(--color-error)', background: 'transparent', border: '1px solid var(--color-error)', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', width: '100%' }}
-                >
-                    Reset App Data
-                </button>
-            </section>
-
-            {/* Sleep Settings Modal */}
-            <Modal
-                isOpen={showSleepModal}
-                onClose={() => setShowSleepModal(false)}
-                title="Sleep Schedule"
-                actions={
-                    <>
-                        <button className="btn btn-secondary" onClick={() => setShowSleepModal(false)}>Cancel</button>
-                        <button className="btn btn-primary" onClick={saveSleepSettings}>Save</button>
-                    </>
-                }
-            >
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '12px', fontWeight: 'bold', cursor: 'pointer' }}>
+                    <label className="switch">
                         <input
                             type="checkbox"
-                            checked={sleepEnabled}
-                            onChange={(e) => setSleepEnabled(e.target.checked)}
-                            style={{ width: '20px', height: '20px' }}
+                            checked={state.notifications?.studyBreaksEnabled ?? false}
+                            onChange={(e) => {
+                                updateSettings({
+                                    notifications: {
+                                        classRemindersEnabled: state.notifications?.classRemindersEnabled ?? false,
+                                        studyBreaksEnabled: e.target.checked
+                                    }
+                                });
+                            }}
                         />
-                        Enable Melatonin Mode
+                        <span className="slider round"></span>
                     </label>
+                </div>
 
-                    <div style={{
-                        display: 'grid',
-                        gridTemplateColumns: '1fr 1fr',
-                        gap: '16px',
-                        opacity: sleepEnabled ? 1 : 0.5,
-                        pointerEvents: sleepEnabled ? 'auto' : 'none',
-                        transition: 'opacity 0.2s'
-                    }}>
+                {state.notifications?.studyBreaksEnabled && (
+                    <div style={{ marginTop: '12px', padding: '12px', background: '#f9f9f9', borderRadius: '8px', marginBottom: '12px' }}>
+                        <button
+                            onClick={testNotification}
+                            className="btn"
+                            style={{
+                                width: '100%',
+                                padding: '8px',
+                                background: '#fff',
+                                border: '1px solid #ccc',
+                                color: '#333',
+                                fontSize: '0.9rem'
+                            }}
+                        >
+                            Test Notification (6s delay)
+                        </button>
+                    </div>
+                )}
+
+                {/* Class Reminders */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 0' }}>
+                    <div>
+                        <div style={{ fontWeight: 600, fontSize: '1rem' }}>Class Reminders</div>
+                        <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
+                            Get notified 15 mins before class.
+                        </div>
+                    </div>
+                    <label className="switch">
+                        <input
+                            type="checkbox"
+                            checked={state.notifications?.classRemindersEnabled ?? false}
+                            onChange={(e) => {
+                                const checked = e.target.checked;
+                                updateSettings({
+                                    notifications: {
+                                        studyBreaksEnabled: state.notifications?.studyBreaksEnabled ?? false,
+                                        classRemindersEnabled: checked
+                                    }
+                                });
+
+                                if (checked) scheduleClassReminders?.(15);
+                                else cancelClassReminders?.();
+                            }}
+                        />
+                        <span className="slider round"></span>
+                    </label>
+                </div>
+            </div>
+
+            <div className="card">
+                <h2 className="text-h2">🧘 Zen Mode</h2>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0' }}>
+                    <div>
+                        <div style={{ fontWeight: 600 }}>Focus Mode Guide</div>
+                        <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+                            Show reminder to use Guided Access when studying.
+                        </div>
+                    </div>
+                    <label className="switch">
+                        <input
+                            type="checkbox"
+                            checked={state.zenMode ?? false}
+                            onChange={() => updateSettings({ zenMode: !state.zenMode })}
+                        />
+                        <span className="slider round"></span>
+                    </label>
+                </div>
+                {state.zenMode && (
+                    <div style={{ marginTop: '12px', padding: '12px', background: '#f0f9ff', borderRadius: '8px', fontSize: '0.85rem', color: '#005580' }}>
+                        <p style={{ marginBottom: '8px' }}>
+                            ℹ️ <strong>How it works:</strong> When you start a session, we'll remind you to enable <strong>Guided Access</strong> (Triple-click Side Button) to lock your phone to StudyBudy and block other apps.
+                        </p>
+                        <a
+                            href="App-Prefs:root=General&path=ACCESSIBILITY"
+                            style={{
+                                display: 'inline-block',
+                                color: '#005580',
+                                textDecoration: 'underline',
+                                fontWeight: 600
+                            }}
+                        >
+                            Go to Accessibility Settings →
+                        </a>
+                    </div>
+                )}
+            </div>
+
+            <div className="card">
+                <h2 className="text-h2">😴 Sleep Schedule</h2>
+                <p className="text-body" style={{ marginBottom: '16px' }}>
+                    Hide calendar slots during your sleep hours.
+                </p>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                    <span style={{ fontWeight: 600 }}>Enable Sleep Filter</span>
+                    <label className="switch">
+                        <input
+                            type="checkbox"
+                            checked={state.sleepSettings?.enabled ?? false}
+                            onChange={toggleSleep}
+                        />
+                        <span className="slider round"></span>
+                    </label>
+                </div>
+
+                {state.sleepSettings?.enabled && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                         <div>
-                            <label className="text-body" style={{ display: 'block', marginBottom: '8px' }}>Bedtime 🌙</label>
+                            <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '4px' }}>Bedtime</label>
                             <input
                                 type="time"
+                                value={state.sleepSettings?.start || '22:00'}
+                                onChange={(e) => {
+                                    const current = state.sleepSettings || { enabled: false, start: '22:00', end: '06:00' };
+                                    updateSettings({
+                                        sleepSettings: { ...current, start: e.target.value }
+                                    });
+                                }}
                                 className="input"
-                                value={bedtime}
-                                onChange={(e) => setBedtime(e.target.value)}
-                                style={{ width: '100%' }}
+                                style={{ width: '100%', padding: '8px' }}
                             />
                         </div>
                         <div>
-                            <label className="text-body" style={{ display: 'block', marginBottom: '8px' }}>Wake Up ☀️</label>
+                            <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '4px' }}>Wake Up</label>
                             <input
                                 type="time"
+                                value={state.sleepSettings?.end || '06:00'}
+                                onChange={(e) => {
+                                    const current = state.sleepSettings || { enabled: false, start: '22:00', end: '06:00' };
+                                    updateSettings({
+                                        sleepSettings: { ...current, end: e.target.value }
+                                    });
+                                }}
                                 className="input"
-                                value={waketime}
-                                onChange={(e) => setWaketime(e.target.value)}
-                                style={{ width: '100%' }}
+                                style={{ width: '100%', padding: '8px' }}
                             />
                         </div>
                     </div>
+                )}
+            </div>
 
-                    <p style={{ fontSize: '0.9rem', color: '#666', marginTop: '-8px' }}>
-                        {sleepEnabled
-                            ? "We'll block these hours on your calendar to protect your rest."
-                            : "Enable this to visually block off sleep hours on your calendar."}
+            {user && (
+                <div className="card" style={{ marginTop: '24px', border: '1px solid #fee2e2', background: '#fff5f5' }}>
+                    <h2 className="text-h2" style={{ color: '#c53030' }}>🚫 Account</h2>
+                    <p className="text-body" style={{ marginBottom: '16px' }}>
+                        Logged in as: <strong>{user.email}</strong>
                     </p>
+                    <button
+                        onClick={async () => {
+                            await signOut?.();
+                            window.location.href = '/login';
+                        }}
+                        className="btn"
+                        style={{
+                            width: '100%',
+                            background: '#fff',
+                            border: '1px solid #feb2b2',
+                            color: '#c53030',
+                            fontWeight: 600
+                        }}
+                    >
+                        Sign Out
+                    </button>
                 </div>
-            </Modal>
+            )}
 
-            {/* Clear Schedule Modal */}
+            <div className="card" style={{ marginTop: '24px' }}>
+                <h2 className="text-h2">🎓 Semester Management</h2>
+                <p className="text-body" style={{ marginBottom: '16px' }}>
+                    Start fresh for a new semester.
+                </p>
+                <button
+                    onClick={() => setShowSemesterModal(true)}
+                    className="btn"
+                    style={{
+                        width: '100%',
+                        background: 'transparent',
+                        border: '1px solid var(--color-text-secondary)',
+                        color: 'var(--color-text-main)',
+                        opacity: 0.8
+                    }}
+                >
+                    Done with Semester
+                </button>
+            </div>
+
+            {/* Semester Reset Confirmation Modal */}
             <Modal
-                isOpen={showConfirm}
-                onClose={() => setShowConfirm(false)}
-                title="Clear Schedule?"
+                isOpen={showSemesterModal}
+                onClose={() => setShowSemesterModal(false)}
+                title="End Semester?"
                 type="danger"
                 actions={
                     <>
-                        <button className="btn btn-secondary" onClick={() => setShowConfirm(false)}>Cancel</button>
+                        <button className="btn btn-secondary" onClick={() => setShowSemesterModal(false)}>Cancel</button>
                         <button
                             className="btn"
-                            style={{ background: 'var(--color-error)', color: 'white' }}
-                            onClick={handleClearSchedule}
+                            style={{ background: 'var(--color-primary)', color: 'white' }}
+                            onClick={async () => {
+                                await archiveAllClasses?.(); // Optional chain safe
+                                setShowSemesterModal(false);
+                                alert('Semester ended! Classes archived. Good luck with the next one! 🍀');
+                            }}
                         >
-                            Yes, Clear Schedule
+                            Archive Classes
                         </button>
                     </>
                 }
             >
                 <p>
-                    Are you sure you want to clear your schedule?
+                    This will <strong>archive all current classes</strong> and clear their weekly schedules.
                 </p>
-                <p style={{ fontSize: '0.9rem', marginTop: '12px', color: '#666' }}>
-                    This will remove all your class times and study blocks, but keep your points and unlocked items.
+                <p style={{ marginTop: '12px', fontSize: '0.9rem', color: '#666' }}>
+                    Don't worry, your <strong>stats and history are safe</strong>! You can still see your total study time in the Stats page.
                 </p>
             </Modal>
 
-            {/* Reset Data Modal */}
-            <Modal
-                isOpen={showResetConfirm}
-                onClose={() => setShowResetConfirm(false)}
-                title="Factory Reset?"
-                type="danger"
-                actions={
-                    <>
-                        <button className="btn btn-secondary" onClick={() => setShowResetConfirm(false)}>Cancel</button>
-                        <button
-                            className="btn"
-                            style={{ background: 'var(--color-error)', color: 'white' }}
-                            onClick={handleResetData}
-                        >
-                            Yes, Delete Everything
-                        </button>
-                    </>
+            <div className="text-center" style={{ marginTop: '32px', opacity: 0.5, fontSize: '0.8rem' }}>
+                Study Budy v1.0.0
+            </div>
+
+            <style jsx>{`
+                .switch {
+                    position: relative;
+                    display: inline-block;
+                    width: 50px;
+                    height: 28px;
                 }
-            >
-                <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: '3rem', marginBottom: '16px' }}>💥</div>
-                    <p>
-                        <strong>Warning:</strong> This will delete all your classes, points, unlocked items, and schedule data.
-                    </p>
-                    <p style={{ fontSize: '0.9rem', marginTop: '12px' }}>
-                        This action is irreversible. You will be returned to the onboarding screen.
-                    </p>
-                </div>
-            </Modal>
+                .switch input {
+                    opacity: 0;
+                    width: 0;
+                    height: 0;
+                }
+                .slider {
+                    position: absolute;
+                    cursor: pointer;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
+                    background-color: #ccc;
+                    transition: .4s;
+                }
+                .slider:before {
+                    position: absolute;
+                    content: "";
+                    height: 20px;
+                    width: 20px;
+                    left: 4px;
+                    bottom: 4px;
+                    background-color: white;
+                    transition: .4s;
+                }
+                input:checked + .slider {
+                    background-color: var(--color-primary);
+                }
+                input:focus + .slider {
+                    box-shadow: 0 0 1px var(--color-primary);
+                }
+                input:checked + .slider:before {
+                    transform: translateX(22px);
+                }
+                .slider.round {
+                    border-radius: 34px;
+                }
+                .slider.round:before {
+                    border-radius: 50%;
+                }
+                .input {
+                    border: 1px solid #ddd;
+                    border-radius: 8px;
+                    font-size: 1rem;
+                }
+            `}</style>
         </main>
     );
 }

@@ -9,9 +9,28 @@ export default function StatsPage() {
     const { state } = useApp();
 
     // -- Metrics Calculation --
+    // -- Metrics Calculation --
+    const [timeRange, setTimeRange] = useState<'week' | 'month' | 'year' | 'all'>('week');
+
+    const filteredSessions = useMemo(() => {
+        const now = new Date();
+        return state.studySessions.filter(session => {
+            const sessionDate = new Date(session.timestamp); // Timestamp is simpler
+            if (timeRange === 'all') return true;
+
+            const diffTime = Math.abs(now.getTime() - sessionDate.getTime());
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+            if (timeRange === 'week') return diffDays <= 7;
+            if (timeRange === 'month') return diffDays <= 30;
+            if (timeRange === 'year') return diffDays <= 365;
+            return true;
+        });
+    }, [state.studySessions, timeRange]);
+
     const totalMinutes = useMemo(() => {
-        return state.studySessions.reduce((acc, curr) => acc + curr.durationMinutes, 0);
-    }, [state.studySessions]);
+        return filteredSessions.reduce((acc, curr) => acc + curr.durationMinutes, 0);
+    }, [filteredSessions]);
 
     const totalHours = (totalMinutes / 60).toFixed(1);
 
@@ -24,7 +43,7 @@ export default function StatsPage() {
         });
 
         // Sum up sessions
-        state.studySessions.forEach(s => {
+        filteredSessions.forEach(s => {
             stats[s.classId] = (stats[s.classId] || 0) + s.durationMinutes;
         });
 
@@ -39,8 +58,16 @@ export default function StatsPage() {
                     color: cls?.color || '#ccc'
                 };
             })
+            // Filter out classes with 0 minutes if you want clean chart, or keep them to show what is neglected.
+            // Keeping them is good for "what to study next".
+            .filter(item => {
+                // Should we hide archived classes if they have 0 minutes? Yes.
+                const cls = state.classes.find(c => c.id === item.classId);
+                if (cls?.isArchived && item.minutes === 0) return false;
+                return true;
+            })
             .sort((a, b) => b.minutes - a.minutes); // Sort by most studied
-    }, [state.studySessions, state.classes]);
+    }, [filteredSessions, state.classes]);
 
     // -- Achievements Logic --
     // Simple milestones for now
@@ -72,7 +99,7 @@ export default function StatsPage() {
     ];
 
     return (
-        <main className="container">
+        <main className="container" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 16px)' }}>
             <div style={{ marginBottom: '16px' }}>
                 <Link href="/dashboard" style={{ textDecoration: 'none', color: 'var(--color-text-secondary)', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
                     ← Back to Dashboard
@@ -101,36 +128,92 @@ export default function StatsPage() {
                 </div>
             </section>
 
-            {/* Class Breakdown */}
+            {/* Class Breakdown with Filters */}
             <section style={{ marginBottom: '32px' }}>
-                <h2 className="text-h2" style={{ marginBottom: '16px' }}>Subject Breakdown</h2>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                    <h2 className="text-h2">Subject Breakdown</h2>
+                    {/* Time Range Filter */}
+                    <div style={{ display: 'flex', background: '#f0f0f0', borderRadius: '8px', padding: '2px' }}>
+                        {(['week', 'month', 'year', 'all'] as const).map((range) => (
+                            <button
+                                key={range}
+                                onClick={() => setTimeRange(range)}
+                                style={{
+                                    border: 'none',
+                                    background: timeRange === range ? 'white' : 'transparent',
+                                    boxShadow: timeRange === range ? '0 2px 4px rgba(0,0,0,0.1)' : 'none',
+                                    padding: '4px 12px',
+                                    borderRadius: '6px',
+                                    fontSize: '0.8rem',
+                                    cursor: 'pointer',
+                                    fontWeight: timeRange === range ? 600 : 400,
+                                    color: timeRange === range ? 'var(--color-primary)' : '#666',
+                                    textTransform: 'capitalize'
+                                }}
+                            >
+                                {range}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
                 {classStats.length === 0 ? (
-                    <p className="text-body" style={{ opacity: 0.6, fontStyle: 'italic' }}>No study sessions recorded yet.</p>
+                    <div className="card text-center" style={{ padding: '32px' }}>
+                        <p className="text-body" style={{ opacity: 0.6 }}>No study sessions found for this period.</p>
+                    </div>
                 ) : (
                     <div className="card">
-                        {classStats.map(item => (
-                            <div key={item.classId} style={{ marginBottom: '16px' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: '0.9rem' }}>
-                                    <span style={{ fontWeight: 600 }}>{item.className}</span>
-                                    <span>{(item.minutes / 60).toFixed(1)} hrs</span>
-                                </div>
-                                {/* Progress Bar representing % of total study time */}
-                                <div style={{
-                                    width: '100%',
-                                    height: '8px',
-                                    background: '#f0f0f0',
-                                    borderRadius: '4px',
-                                    overflow: 'hidden'
-                                }}>
-                                    <div style={{
-                                        width: `${totalMinutes > 0 ? (item.minutes / totalMinutes) * 100 : 0}%`,
-                                        height: '100%',
-                                        background: item.color,
-                                        borderRadius: '4px'
-                                    }} />
-                                </div>
-                            </div>
-                        ))}
+                        {/* Bar Graph */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                            {classStats.map(item => {
+                                const maxMinutes = Math.max(...classStats.map(c => c.minutes));
+                                // Minimum width for visibility if > 0
+                                const widthPercent = maxMinutes > 0 ? (item.minutes / maxMinutes) * 100 : 0;
+
+                                return (
+                                    <div key={item.classId} style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                        {/* Label with Color Indicator */}
+                                        <div style={{ width: '120px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }}>
+                                            <div style={{
+                                                width: '8px',
+                                                height: '8px',
+                                                borderRadius: '50%',
+                                                background: item.color,
+                                                flexShrink: 0
+                                            }} />
+                                            <div style={{
+                                                fontSize: '0.85rem',
+                                                fontWeight: 600,
+                                                whiteSpace: 'nowrap',
+                                                overflow: 'hidden',
+                                                textOverflow: 'ellipsis',
+                                                textAlign: 'right',
+                                                direction: 'rtl', // Ensure truncation happens on the left side if needed
+                                            }}>
+                                                {item.className}
+                                            </div>
+                                        </div>
+
+                                        {/* Bar Area */}
+                                        <div style={{ flex: 1, height: '24px', background: '#f5f5f5', borderRadius: '4px', overflow: 'hidden', position: 'relative' }}>
+                                            <div style={{
+                                                width: `${widthPercent}%`,
+                                                height: '100%',
+                                                background: item.color,
+                                                borderRadius: '4px',
+                                                transition: 'width 0.5s ease-out',
+                                                minWidth: item.minutes > 0 ? '4px' : '0' // Ensure visible if > 0
+                                            }} />
+                                        </div>
+
+                                        {/* Value Label */}
+                                        <div style={{ width: '60px', fontSize: '0.8rem', color: '#666' }}>
+                                            {(item.minutes / 60).toFixed(1)} hrs
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
                     </div>
                 )}
             </section>

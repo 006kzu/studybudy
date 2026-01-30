@@ -4,6 +4,8 @@ import { useState, useRef, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useApp, ScheduleItem } from '@/context/AppContext';
 import Modal from '@/components/Modal';
+import { CLASS_COLORS, DEFAULT_CLASS_COLOR } from '@/constants/classColors';
+import { generateUUID } from '@/lib/uuid';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
 // HOURS is now dynamic inside component
@@ -19,7 +21,7 @@ function OnboardingContent() {
     // Step 1 State
     const [className, setClassName] = useState('');
     const [durationGoal, setDurationGoal] = useState(2);
-    const [color, setColor] = useState('#FF7E36');
+    const [color, setColor] = useState(DEFAULT_CLASS_COLOR);
     const [showDuplicateModal, setShowDuplicateModal] = useState(false);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
 
@@ -160,7 +162,7 @@ function OnboardingContent() {
     const handleFinish = async () => {
         console.log('Starting handleFinish...');
         try {
-            const classId = editClassId || crypto.randomUUID();
+            const classId = editClassId || generateUUID();
             const classData = {
                 id: classId,
                 name: className,
@@ -225,7 +227,7 @@ function OnboardingContent() {
                 const startDateISO = startDate.toISOString().split('T')[0];
 
                 newScheduleItems.push({
-                    id: crypto.randomUUID(),
+                    id: generateUUID(),
                     day: day as any,
                     startTime: startStr,
                     endTime: endStr,
@@ -269,7 +271,7 @@ function OnboardingContent() {
     }, []);
 
     return (
-        <div className="card animate-fade-in" style={{ maxWidth: '800px', margin: '5vh auto' }}>
+        <div className="card animate-fade-in" style={{ width: '95%', maxWidth: '800px', margin: '2vh auto' }}>
             {step === 1 ? (
                 <>
                     <h1 className="text-h1 text-center">{editClassId ? 'Edit Class' : 'Class Details'}</h1>
@@ -301,7 +303,7 @@ function OnboardingContent() {
 
                         <label className="text-body" style={{ display: 'block', marginBottom: '8px' }}>Color Code</label>
                         <div style={{ display: 'flex', gap: '12px' }}>
-                            {['#FF7E36', '#4A90E2', '#34C759', '#FF3B30', '#9013FE'].map((c) => (
+                            {CLASS_COLORS.map((c) => (
                                 <div
                                     key={c}
                                     onClick={() => setColor(c)}
@@ -321,7 +323,7 @@ function OnboardingContent() {
 
                     <button
                         onClick={() => {
-                            const duplicate = state.classes.find(c =>
+                            const duplicate = state.classes.filter(c => !c.isArchived).find(c =>
                                 c.name.toLowerCase() === className.toLowerCase() && c.id !== editClassId
                             );
                             if (duplicate) {
@@ -377,34 +379,68 @@ function OnboardingContent() {
                     <p className="text-body text-center" style={{ marginBottom: '8px', opacity: 0.7 }}>Step 2 of 2</p>
                     <h1 className="text-h1 text-center">When is this class?</h1>
                     <p className="text-body text-center" style={{ marginBottom: '16px', opacity: 0.7 }}>
-                        Click & Drag
+                        Tap & Drag to paint time blocks
                     </p>
 
-                    <div style={{
-                        display: 'grid',
-                        gridTemplateColumns: '60px repeat(5, 1fr)',
-                        gap: '0',
-                        userSelect: 'none',
-                        touchAction: 'none'
-                    }}>
-                        <div></div>
+
+
+                    <div
+                        className="calendar-grid"
+                        style={{
+                            display: 'grid',
+                            gridTemplateColumns: '50px repeat(5, 1fr)',
+                            gap: '1px',
+                            userSelect: 'none',
+                            touchAction: 'none', // Critical for drag interactions
+                            background: '#999', // Grid lines (gap color)
+                            border: '1px solid #999',
+                            fontSize: '0.8rem'
+                        }}
+                        onTouchMove={(e) => {
+                            // Custom Touch Drag Logic
+                            // We need to find the element under the finger
+                            const touch = e.touches[0];
+                            const target = document.elementFromPoint(touch.clientX, touch.clientY);
+                            if (target && target instanceof HTMLElement) {
+                                // We store data attributes on the slots to identify them
+                                const day = target.dataset.day;
+                                const hour = target.dataset.hour;
+                                const min = target.dataset.min;
+
+                                if (day && hour && min) {
+                                    if (isDragging.current) {
+                                        // "Paint" mode - if we started by adding, we add. If removing, we remove.
+                                        // But simple toggle might flicker. 
+                                        // Ideally we know if we are Adding or Removing based on the first touch.
+                                        toggleSlot(day, parseInt(hour), parseInt(min), addMode.current);
+                                    }
+                                }
+                            }
+                        }}
+                    >
+                        {/* Header Row */}
+                        <div style={{ background: '#f9f9f9' }}></div>
                         {DAYS.map(d => (
-                            <div key={d} style={{ textAlign: 'center', fontWeight: 'bold', fontSize: '0.9rem', paddingBottom: '8px' }}>{d}</div>
+                            <div key={d} style={{ background: '#f9f9f9', textAlign: 'center', fontWeight: 'bold', padding: '8px 0', fontSize: '0.8rem' }}>{d}</div>
                         ))}
 
+                        {/* Grid Rows */}
                         {HOURS.map(h => (
                             [0, 15, 30, 45].map((currMin, idx) => (
                                 <div key={`row-${h}-${currMin}`} style={{ display: 'contents' }}>
+                                    {/* Time Label */}
                                     <div style={{
+                                        background: 'white',
                                         textAlign: 'right',
-                                        paddingRight: '8px',
-                                        fontSize: '0.75rem',
+                                        paddingRight: '6px',
+                                        fontSize: '0.7rem',
                                         color: '#999',
-                                        paddingTop: '2px',
-                                        visibility: currMin === 0 ? 'visible' : 'hidden',
-                                        transform: 'translateY(-50%)'
+                                        display: 'flex',
+                                        alignItems: 'start',
+                                        justifyContent: 'flex-end',
+                                        paddingTop: '-6px'
                                     }}>
-                                        {format12h(h)}
+                                        {currMin === 0 ? format12h(h) : ''}
                                     </div>
 
                                     {DAYS.map(d => {
@@ -424,33 +460,45 @@ function OnboardingContent() {
                                         });
 
                                         let style: React.CSSProperties = {
-                                            height: '20px',
+                                            height: '24px', // Taller touch target
+                                            background: 'white',
                                             cursor: (existingEvent || isSleep) ? 'not-allowed' : 'pointer',
-                                            borderBottom: idx === 3 ? '1px solid #ddd' : '1px solid #f0f0f0',
-                                            borderRight: '1px solid #f0f0f0',
                                             opacity: existingEvent ? 0.5 : 1
                                         };
 
                                         if (isSleep) {
                                             style.background = '#F3E8FF';
-                                            style.borderBottom = 'none';
-                                            style.borderRight = 'none';
-                                            style.borderLeft = 'none'; // Ensure no left border from previous cell if needed, though grid handles this.
                                         } else if (existingEvent) {
                                             const assoc = state.classes.find(c => c.name === existingEvent.label || existingEvent.label?.includes(c.name));
                                             let bg = assoc ? assoc.color : '#ccc';
                                             style.background = bg + '40';
                                         } else if (isSelected) {
                                             style.background = color;
-                                        } else {
-                                            style.background = '#f9f9f9';
                                         }
 
                                         return (
                                             <div
                                                 key={key}
-                                                onMouseDown={() => !existingEvent && !isSleep && handleMouseDown(d, h, currMin)}
+                                                // Data attributes for touch-move detection
+                                                data-day={d}
+                                                data-hour={h}
+                                                data-min={currMin}
+                                                // Mouse Events
+                                                onMouseDown={(e) => {
+                                                    if (existingEvent || isSleep) return;
+                                                    e.preventDefault(); // Prevent text select
+                                                    handleMouseDown(d, h, currMin);
+                                                }}
                                                 onMouseEnter={() => !existingEvent && !isSleep && handleMouseEnter(d, h, currMin)}
+                                                // Touch Events
+                                                onTouchStart={(e) => {
+                                                    if (existingEvent || isSleep) return;
+                                                    // Prevent default scroll if we are hitting a valid cell to allow drag
+                                                    // But we might want scroll if we tap? 
+                                                    // "touchAction: none" on the container handles blocking scroll.
+                                                    handleMouseDown(d, h, currMin);
+                                                }}
+                                                // Note: onTouchMove is handled by parent for performance/ correctness
                                                 onClick={() => !existingEvent && !isSleep && toggleSlot(d, h, currMin)}
                                                 style={style}
                                             />
@@ -461,14 +509,13 @@ function OnboardingContent() {
                         ))}
                     </div>
 
-                    <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
+                    <div style={{ display: 'flex', gap: '12px', marginTop: '24px', paddingBottom: '40px' }}>
                         <button onClick={() => setStep(1)} className="btn btn-secondary" style={{ flex: 1 }}>Back</button>
-                        <button onClick={() => router.push('/dashboard')} className="btn" style={{ flex: 1, background: 'transparent', border: '1px solid #ddd', color: '#666' }}>Cancel</button>
                         <button onClick={() => setSelectedSlots(new Set())} className="btn btn-secondary" style={{ flex: 1, color: 'var(--color-error)', borderColor: 'var(--color-error)' }} disabled={selectedSlots.size === 0}>
                             Clear
                         </button>
                         <button onClick={handleFinish} className="btn btn-primary" style={{ flex: 2 }}>
-                            {editClassId ? 'Save Changes' : 'Finish Setup'}
+                            {editClassId ? 'Save' : 'Finish'}
                         </button>
                     </div>
                 </>
@@ -496,7 +543,7 @@ function OnboardingContent() {
 
 export default function Onboarding() {
     return (
-        <main className="container">
+        <main className="container" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 16px)' }}>
             <Suspense fallback={<div className="text-center p-8">Loading...</div>}>
                 <OnboardingContent />
             </Suspense>

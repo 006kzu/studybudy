@@ -1,15 +1,32 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { Capacitor } from '@capacitor/core';
+import { Browser } from '@capacitor/browser';
+import { useApp } from '@/context/AppContext';
 
 export default function LoginPage() {
+    const { user, isLoading: appLoading } = useApp();
     const router = useRouter();
     const [email, setEmail] = useState('');
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState<{ text: string, type: 'error' | 'success' } | null>(null);
+    const [redirectUrl, setRedirectUrl] = useState<string>('');
+
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            setRedirectUrl(`${window.location.origin}/auth/callback`);
+        }
+
+        // Auto-redirect if already logged in
+        if (user) {
+            console.log('User already logged in, redirecting to dashboard...');
+            router.replace('/dashboard');
+        }
+    }, [user, router]);
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -33,28 +50,42 @@ export default function LoginPage() {
     };
 
     const handleOAuth = async (provider: 'google' | 'apple') => {
-        const redirectTo = `${window.location.origin}/auth/callback`;
+        const isNative = Capacitor.isNativePlatform();
+        const redirectTo = isNative
+            ? 'com.studdybuddies.app://google-auth'
+            : `${window.location.origin}/auth/callback?next=/dashboard`;
+
         console.log('OAuth Redirect URL:', redirectTo);
-        const { error } = await supabase.auth.signInWithOAuth({
+
+        const { data, error } = await supabase.auth.signInWithOAuth({
             provider,
             options: {
                 redirectTo,
+                skipBrowserRedirect: true // Always skip auto-redirect to handle it manually/consistently
             },
         });
+
         if (error) {
             setMessage({ text: error.message, type: 'error' });
+        } else if (data?.url) {
+            // Open the OAuth URL
+            if (isNative) {
+                await Browser.open({ url: data.url });
+            } else {
+                window.location.href = data.url;
+            }
         }
     };
 
     return (
-        <main className="container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '80vh' }}>
+        <main className="container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '80vh', paddingTop: 'calc(env(safe-area-inset-top) + 16px)' }}>
             <div className="card" style={{ width: '100%', maxWidth: '400px', padding: '32px' }}>
                 <div style={{ textAlign: 'center', marginBottom: '24px' }}>
                     <div style={{ fontSize: '3rem', marginBottom: '16px' }}>🌭</div>
                     <h1 className="text-h2">Welcome Back</h1>
                     <p className="text-body" style={{ color: '#666' }}>Sign in to sync your progress</p>
                     <p style={{ fontSize: '0.7rem', color: '#999', marginTop: '8px' }}>
-                        Redirecting to: {typeof window !== 'undefined' ? `${window.location.origin}/auth/callback` : '...'}
+                        Redirecting to: {redirectUrl || '...'}
                     </p>
                 </div>
 

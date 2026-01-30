@@ -2,7 +2,9 @@
 
 import { useApp, ScheduleItem } from '@/context/AppContext';
 import Link from 'next/link';
+import { generateUUID } from '@/lib/uuid';
 import Modal from '@/components/Modal';
+import Toast from '@/components/Toast';
 import { useState, useEffect, useRef } from 'react';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -20,50 +22,52 @@ export default function SchedulePage() {
 
     const containerRef = useRef<HTMLDivElement>(null);
 
-    const [showSuccessModal, setShowSuccessModal] = useState(false);
     const [showClearModal, setShowClearModal] = useState(false);
+    const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
     // Responsive View State
     const [viewDays, setViewDays] = useState(7);
     const [startDayIndex, setStartDayIndex] = useState(0);
     const [weekOffset, setWeekOffset] = useState(0);
-
-    // Smart Scroll Effect
-    useEffect(() => {
-        if (containerRef.current) {
-            let targetHour = 8; // Default to 8am
-            let targetMin = 0;
-
-            if (state.sleepSettings?.enabled) {
-                // Parse Wake Time (End of Sleep)
-                const [endH, endM] = state.sleepSettings.end.split(':').map(Number);
-                targetHour = endH;
-                targetMin = endM;
-            }
-
-            // Height logic: 24px per 15 min slot.
-            // 4 slots per hour = 96px.
-            const pixelOffset = (targetHour * 96) + ((targetMin / 15) * 24);
-
-            // Scroll to it immediately
-            // Add 120px (1 hour 15 mins) as requested
-            containerRef.current.scrollTop = Math.max(0, pixelOffset + 120);
-        }
-    }, [state.sleepSettings]);
+    const [isMobile, setIsMobile] = useState(false);
+    const [isMounted, setIsMounted] = useState(false);
 
     useEffect(() => {
+        setIsMounted(true);
         const handleResize = () => {
-            if (window.innerWidth < 768) {
-                setViewDays(3);
-            } else {
-                setViewDays(7);
-                setStartDayIndex(0);
-            }
+            setIsMobile(window.innerWidth < 768);
+            // Always show 7 days now, but use CSS to handle responsiveness
+            setViewDays(7);
+            setStartDayIndex(0);
         };
         handleResize();
         window.addEventListener('resize', handleResize);
         return () => window.removeEventListener('resize', handleResize);
     }, []);
+
+    // Smart Scroll Effect
+    useEffect(() => {
+        if (isMounted && containerRef.current) {
+            let targetHour = 8; // Default to 8am
+            let targetMin = 0;
+
+            if (state.sleepSettings?.enabled) {
+                const [endH, endM] = state.sleepSettings.end.split(':').map(Number);
+                targetHour = endH;
+                targetMin = endM;
+            }
+
+            // Height logic: 18px per 15 min slot => 72px per hour
+            const pixelOffset = (targetHour * 72) + ((targetMin / 15) * 18);
+
+            // Scroll with a slight delay to ensure layout is ready
+            setTimeout(() => {
+                if (containerRef.current) {
+                    containerRef.current.scrollTop = pixelOffset;
+                }
+            }, 100);
+        }
+    }, [state.sleepSettings, isMounted]);
 
     const getVisibleIndices = () => {
         const indices = [];
@@ -77,6 +81,9 @@ export default function SchedulePage() {
 
     const visibleIndices = getVisibleIndices();
 
+    // Interaction Mode
+    const [isAddMode, setIsAddMode] = useState(false);
+
     // Blocking Interaction
     const [isDragging, setIsDragging] = useState(false);
     const [dragSelection, setDragSelection] = useState<{ day: string, time: string }[]>([]);
@@ -89,6 +96,19 @@ export default function SchedulePage() {
     const [editingEventId, setEditingEventId] = useState<string | null>(null);
 
     // Sleep Helper
+    const inputRef = useRef<HTMLInputElement>(null);
+
+    // Auto-focus input when modal opens (Mobile Fix)
+    useEffect(() => {
+        if (showBlockModal) {
+            // Tiny delay to allow modal animation/rendering to complete
+            const timer = setTimeout(() => {
+                inputRef.current?.focus();
+            }, 100);
+            return () => clearTimeout(timer);
+        }
+    }, [showBlockModal]);
+
     const isSleepTime = (h: number, m: number) => {
         if (!state.sleepSettings?.enabled) return false;
         const { start, end } = state.sleepSettings;
@@ -134,6 +154,10 @@ export default function SchedulePage() {
         return `${hr}${p}`;
     };
 
+    const formatDateWithDay = (date: Date) => {
+        return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    };
+
     const nextView = () => {
         if (viewDays === 7) {
             setWeekOffset(w => w + 1);
@@ -162,48 +186,149 @@ export default function SchedulePage() {
         }
     };
 
-    const handleAutoSchedule = () => {
-        let currentDayIndex = 0;
-        let currentHour = 8;
+    // Auto-Fill V3 State
+    const autoFillIndex = useRef(0);
+    const [autoFillMode, setAutoFillMode] = useState<string>('');
 
-        state.classes.forEach(cls => {
-            let minutesNeeded = cls.weeklyGoalMinutes;
-            let attempts = 0;
+    const MODES = [
+        { name: '⚖️ Balanced', type: 'balanced' },
+        { name: '🌅 Early Bird', type: 'early' },
+        { name: '🦉 Night Owl', type: 'night' },
+        { name: '🏖️ Weekend Warrior', type: 'weekend' },
+        { name: '🤓 The Grinder', type: 'grinder' },
+    ];
 
-            while (minutesNeeded > 0 && attempts < 1000) {
-                attempts++;
-                const day = DAYS[currentDayIndex];
+    const handleAutoSchedule = async () => {
+        const currentMode = MODES[autoFillIndex.current % MODES.length];
+        setAutoFillMode(currentMode.name);
+        autoFillIndex.current += 1;
 
-                if (isSleepTime(currentHour, 0)) {
-                    currentHour++;
-                    if (currentHour >= 24) {
-                        currentHour = 0;
-                        currentDayIndex = (currentDayIndex + 1) % 7;
-                    }
-                    continue;
+        // 1. Clear existing study sessions (Smart Re-roll)
+        await clearStudySchedule();
+
+        // 2. Generate New Schedule
+        const newItems: ScheduleItem[] = [];
+
+        // Helper to check collision with ANY existing item (class, sleep, or newly added study)
+        const isOccupied = (day: string, h: number, m: number) => {
+            // Check against existing state.schedule (classes/blocks)
+            const collision = state.schedule.some(s => {
+                if (s.day !== day) return false;
+                const [sH, sM] = s.startTime.split(':').map(Number);
+                const [eH, eM] = s.endTime.split(':').map(Number);
+                const sVal = sH * 60 + sM;
+                const eVal = eH * 60 + eM;
+                const cVal = h * 60 + m;
+                return cVal >= sVal && cVal < eVal;
+            }) || isSleepTime(h, m);
+
+            if (collision) return true;
+
+            // Check against newly added items in this batch
+            return newItems.some(s => {
+                if (s.day !== day) return false;
+                const [sH, sM] = s.startTime.split(':').map(Number);
+                const [eH, eM] = s.endTime.split(':').map(Number);
+                const sVal = sH * 60 + sM;
+                const eVal = eH * 60 + eM;
+                const cVal = h * 60 + m;
+                return cVal >= sVal && cVal < eVal;
+            });
+        };
+
+        const tryFillBlock = (cls: any, day: string, startH: number, endH: number, minutesNeeded: number) => {
+            if (minutesNeeded <= 0) return 0;
+            let filled = 0;
+
+            // Try to find 1 hour blocks (60m)
+            for (let h = startH; h < endH; h++) {
+                if (filled >= minutesNeeded) break;
+
+                // Check full hour availability (0,15,30,45)
+                let hourFree = true;
+                for (let m of [0, 15, 30, 45]) {
+                    if (isOccupied(day, h, m)) hourFree = false;
                 }
 
-                const newItem: ScheduleItem = {
-                    id: crypto.randomUUID(),
-                    day: day as any,
-                    startTime: `${currentHour}:00`,
-                    endTime: `${currentHour + 1}:00`,
-                    type: 'study',
-                    label: `Study ${cls.name}`,
-                    classId: cls.id,
-                    isRecurring: true,
-                    startDate: formatISO(getWeekDate(currentDayIndex))
-                };
-                addScheduleItem(newItem);
-                minutesNeeded -= 60;
-                currentHour += 1;
-                if (currentHour >= 24) {
-                    currentHour = 0;
-                    currentDayIndex = (currentDayIndex + 1) % 7;
+                if (hourFree) {
+                    // Create Study Item
+                    const dayIndex = DAYS.indexOf(day);
+
+                    newItems.push({
+                        id: generateUUID(),
+                        day: day as any,
+                        startTime: `${h}:00`,
+                        endTime: `${h + 1}:00`,
+                        type: 'study',
+                        label: `Study ${cls.name}`,
+                        classId: cls.id,
+                        isRecurring: true,
+                        startDate: formatISO(getWeekDate(dayIndex))
+                    });
+
+                    filled += 60;
+                    if (currentMode.type === 'balanced') h++; // Buffer if balanced
                 }
             }
-        });
-        setShowSuccessModal(true);
+            return filled;
+        };
+
+        // Iterate Classes
+        const activeClasses = state.classes.filter(c => !c.isArchived);
+
+        for (const cls of activeClasses) {
+            let minutesNeeded = cls.weeklyGoalMinutes;
+
+            // Strategy Implementations
+            if (currentMode.type === 'balanced') {
+                const workDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].sort(() => Math.random() - 0.5);
+                for (const day of workDays) {
+                    minutesNeeded -= tryFillBlock(cls, day, 9, 17, minutesNeeded);
+                }
+            }
+            else if (currentMode.type === 'early') {
+                const workDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].sort(() => Math.random() - 0.5);
+                for (const day of workDays) {
+                    minutesNeeded -= tryFillBlock(cls, day, 6, 9, minutesNeeded);
+                }
+            }
+            else if (currentMode.type === 'night') {
+                const workDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].sort(() => Math.random() - 0.5);
+                for (const day of workDays) {
+                    minutesNeeded -= tryFillBlock(cls, day, 20, 24, minutesNeeded);
+                }
+            }
+            else if (currentMode.type === 'weekend') {
+                const weekends = ['Sat', 'Sun'].sort(() => Math.random() - 0.5);
+                for (const day of weekends) {
+                    minutesNeeded -= tryFillBlock(cls, day, 10, 20, minutesNeeded);
+                }
+            }
+            else if (currentMode.type === 'grinder') {
+                const day = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'][Math.floor(Math.random() * 5)];
+                minutesNeeded -= tryFillBlock(cls, day, 8, 22, minutesNeeded);
+                if (minutesNeeded > 0) {
+                    const day2 = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].filter(d => d !== day)[Math.floor(Math.random() * 4)];
+                    minutesNeeded -= tryFillBlock(cls, day2, 8, 22, minutesNeeded);
+                }
+            }
+
+            // Fallback
+            if (minutesNeeded > 0) {
+                const allDays = [...DAYS].sort(() => Math.random() - 0.5);
+                for (const day of allDays) {
+                    minutesNeeded -= tryFillBlock(cls, day, 8, 22, minutesNeeded);
+                }
+            }
+        }
+
+        // Batch Add (We iterate and add one by one or we could add a bulk method, but for now loop)
+        for (const item of newItems) {
+            await addScheduleItem(item);
+        }
+
+        // setShowSuccessModal(true); // Removed per user request
+        setToast({ message: `Optimized for: ${currentMode.name}`, type: 'success' });
     };
 
     // Drag Handlers
@@ -293,7 +418,7 @@ export default function SchedulePage() {
         const selectedDateISO = formatISO(getWeekDate(dayIndex));
 
         const newItem: ScheduleItem = {
-            id: crypto.randomUUID(),
+            id: generateUUID(),
             day: start.day as any,
             startTime: start.time.split(':').map(t => t.toString().padStart(2, '0')).join(':'),
             endTime: `${eH}:${eM.toString().padStart(2, '0')}`,
@@ -321,39 +446,72 @@ export default function SchedulePage() {
     }, [isDragging]);
 
     const hasStudyItems = state.schedule.some(s => s.type === 'study');
+
+    // Dynamic Column Sizing
+    // User requested "smaller" horizontally to see more without scrolling.
+    // We will fit all 7 days even on mobile (1fr).
+    const columnWidth = '1fr';
+
     const gridStyle = {
-        gridTemplateColumns: `60px repeat(${viewDays}, 1fr)`
+        gridTemplateColumns: `60px repeat(${viewDays}, ${columnWidth})`
     };
 
+    if (!isMounted) return null;
+
     return (
-        <main className="container" onMouseUp={() => isDragging && handleMouseUp()}>
+        <main className="container" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 16px)' }} onMouseUp={() => isDragging && handleMouseUp()} onTouchEnd={() => isDragging && handleMouseUp()}>
             <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <h1 className="text-h1">Schedule</h1>
                 <Link href="/dashboard" className="btn btn-secondary">Done</Link>
             </header>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', fontWeight: 'bold' }}>
-                <button className="btn btn-secondary" onClick={prevView}>← Prev</button>
-                <span>
-                    {formatDate(getWeekDate(visibleIndices[0]))} - {formatDate(getWeekDate(visibleIndices[visibleIndices.length - 1]))}
-                </span>
-                <button className="btn btn-secondary" onClick={nextView}>Next →</button>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', marginBottom: '16px', fontWeight: 'bold' }}>
+                <div style={{ textAlign: 'left' }}>
+                    <button className="btn btn-secondary" onClick={prevView} style={{ padding: '4px 8px', fontSize: '0.8rem' }}>← Prev</button>
+                </div>
+                <div style={{ textAlign: 'center' }}>
+                    {formatDateWithDay(getWeekDate(visibleIndices[0]))} - {formatDateWithDay(getWeekDate(visibleIndices[visibleIndices.length - 1]))}
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                    <button className="btn btn-secondary" onClick={nextView} style={{ padding: '4px 8px', fontSize: '0.8rem' }}>Next →</button>
+                </div>
             </div>
 
-            <div style={{ marginBottom: '24px', display: 'flex', gap: '12px' }}>
-                <button onClick={handleAutoSchedule} className="btn btn-primary" style={{ flex: 1 }}>
-                    ✨ Auto-Fill
+            {/* Toolbar */}
+            <div style={{ marginBottom: '16px', display: 'flex', gap: '12px', alignItems: 'center' }}>
+                <button
+                    onClick={() => setIsAddMode(!isAddMode)}
+                    className={`btn ${isAddMode ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ flex: 2, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px' }}
+                >
+                    {isAddMode ? '✅ Done Adding' : '➕ Add Event'}
                 </button>
+
+                <button
+                    onClick={handleAutoSchedule}
+                    className="btn"
+                    style={{ flex: 0.5, background: 'var(--color-primary)', color: 'white' }}
+                    title={`Current Mode: ${autoFillMode || 'Balanced'}`}
+                >
+                    ✨
+                </button>
+
                 {hasStudyItems && (
                     <button
                         onClick={() => setShowClearModal(true)}
                         className="btn"
-                        style={{ background: 'var(--color-error)', color: 'white', flex: 1 }}
+                        style={{ background: 'var(--color-error)', color: 'white', flex: 0.5 }}
                     >
-                        🗑️ Clear
+                        🗑️
                     </button>
                 )}
             </div>
+
+            {isAddMode && (
+                <div style={{ textAlign: 'center', marginBottom: '12px', fontSize: '0.85rem', color: 'var(--color-primary)', background: '#e6fffa', padding: '8px', borderRadius: '8px' }}>
+                    👆 Tap & Drag on the calendar to create a new block.
+                </div>
+            )}
 
             <div
                 ref={containerRef}
@@ -362,10 +520,43 @@ export default function SchedulePage() {
                     overflow: 'auto',
                     maxHeight: 'calc(100vh - 220px)',
                     position: 'relative',
-                    padding: 0
+                    padding: 0,
+                    // If in Add Mode, prevent default touch actions (scrolling) so we can drag.
+                    // If NOT in Add Mode, allow scrolling (auto).
+                    touchAction: isAddMode ? 'none' : 'auto'
                 }}
             >
-                <div style={{ display: 'grid', ...gridStyle, gap: '0', background: '#f0f0f0' }}>
+                <div
+                    style={{
+                        display: 'grid',
+                        ...gridStyle,
+                        gap: '1px', // Use gap for grid lines
+                        background: '#999', // Darker grid lines (container background showing through gap)
+                        border: '1px solid #999',
+                        minWidth: '100%'
+                    }}
+                    onTouchMove={(e) => {
+                        // Global Touch Move handler for the grid when in Add Mode
+                        if (!isAddMode) return;
+
+                        const touch = e.touches[0];
+                        const target = document.elementFromPoint(touch.clientX, touch.clientY);
+                        if (target && target instanceof HTMLElement) {
+                            const day = target.dataset.day;
+                            const h = target.dataset.hour;
+                            const m = target.dataset.min;
+
+                            if (day && h && m) {
+                                // Delegate to standard logic
+                                // Need to check if we are allowed to drag here (sleep, existing event)
+                                // But handleMouseEnter handles the logic of "adding to drag selection if allowed"
+                                if (isDragging) {
+                                    handleMouseEnter(day, parseInt(h), parseInt(m));
+                                }
+                            }
+                        }
+                    }}
+                >
                     <div style={{
                         position: 'sticky',
                         top: 0,
@@ -389,8 +580,8 @@ export default function SchedulePage() {
                                 padding: '8px 0',
                                 minWidth: 0
                             }}>
-                                <div style={{ fontWeight: 700 }}>{d}</div>
-                                <div style={{ fontSize: '0.7rem', color: '#888' }}>{formatDate(getWeekDate(dayIdx))}</div>
+                                <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>{d}</div>
+                                <div style={{ fontSize: '0.75rem', color: '#666' }}>{formatDate(getWeekDate(dayIdx))}</div>
                             </div>
                         );
                     })}
@@ -486,13 +677,34 @@ export default function SchedulePage() {
                                     return (
                                         <div
                                             key={`${d}-${dayIdx}-${h}-${currMin}`}
+                                            // Data attributes for touch recognition
+                                            data-day={d}
+                                            data-hour={h}
+                                            data-min={currMin}
+
+                                            // Handlers
                                             onMouseDown={() => {
                                                 if (event) handleEventClick(event);
-                                                else handleMouseDown(d, h, currMin);
+                                                else if (isAddMode) handleMouseDown(d, h, currMin);
                                             }}
-                                            onMouseEnter={() => !event && handleMouseEnter(d, h, currMin)}
+                                            onMouseEnter={() => !event && isAddMode && handleMouseEnter(d, h, currMin)}
+
+                                            // Touch Start (Only if Add Mode)
+                                            onTouchStart={(e) => {
+                                                if (event) {
+                                                    // Allow clicking events even in non-add mode? Yes, to edit them.
+                                                    handleEventClick(event);
+                                                    return;
+                                                }
+
+                                                if (isAddMode) {
+                                                    // e.preventDefault(); // handled by touchAction: none container
+                                                    handleMouseDown(d, h, currMin);
+                                                }
+                                            }}
+
                                             style={{
-                                                height: '24px',
+                                                height: '18px',
                                                 ...bgStyle,
                                                 fontSize: '0.7rem',
                                                 padding: '2px 4px',
@@ -502,7 +714,7 @@ export default function SchedulePage() {
                                                 overflow: 'hidden',
                                                 whiteSpace: 'nowrap',
                                                 textOverflow: 'ellipsis',
-                                                cursor: isSleep ? 'not-allowed' : 'pointer'
+                                                cursor: isSleep ? 'not-allowed' : (isAddMode ? 'crosshair' : 'default')
                                             }}
                                         >
                                             {isStart && label}
@@ -517,7 +729,11 @@ export default function SchedulePage() {
 
             <Modal
                 isOpen={showBlockModal}
-                onClose={() => setShowBlockModal(false)}
+                onClose={() => {
+                    setShowBlockModal(false);
+                    setDragSelection([]); // Clear selection on close
+                    setEditingEventId(null);
+                }}
                 title={editingEventId ? "Edit Block" : "Block Time"}
                 actions={
                     <div style={{ display: 'flex', width: '100%', gap: '8px', justifyContent: 'flex-end' }}>
@@ -530,7 +746,11 @@ export default function SchedulePage() {
                                 Delete
                             </button>
                         )}
-                        <button className="btn btn-secondary" onClick={() => setShowBlockModal(false)}>Cancel</button>
+                        <button className="btn btn-secondary" onClick={() => {
+                            setShowBlockModal(false);
+                            setDragSelection([]); // Clear selection on cancel
+                            setEditingEventId(null);
+                        }}>Cancel</button>
                         <button className="btn btn-primary" onClick={saveBlock}>Save</button>
                     </div>
                 }
@@ -539,6 +759,7 @@ export default function SchedulePage() {
                     <div>
                         <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>Event Name</label>
                         <input
+                            ref={inputRef}
                             className="input"
                             value={blockName}
                             onChange={e => setBlockName(e.target.value)}
@@ -552,7 +773,14 @@ export default function SchedulePage() {
                             {COLORS.map(c => (
                                 <div
                                     key={c}
-                                    onClick={() => setBlockColor(c)}
+                                    onPointerDown={(e) => {
+                                        e.preventDefault(); // Prevent default focus behavior
+                                        setBlockColor(c);
+                                        // Optional: Blur input to dismiss keyboard if desired, or keep it. 
+                                        // User complaint was they "have to" click off. 
+                                        // Now the color will set immediately regardless.
+                                        (document.activeElement as HTMLElement)?.blur();
+                                    }}
                                     style={{
                                         width: '30px',
                                         height: '30px',
@@ -578,17 +806,7 @@ export default function SchedulePage() {
                 </div>
             </Modal>
 
-            <Modal
-                isOpen={showSuccessModal}
-                onClose={() => setShowSuccessModal(false)}
-                title="Schedule Optimized"
-                type="success"
-                actions={
-                    <button className="btn btn-primary" onClick={() => setShowSuccessModal(false)}>Awesome</button>
-                }
-            >
-                We've analyzed your academic goals and curated a study plan to maximize your efficiency. Your calendar is now populated with optimal study blocks. Good luck! 📅✨
-            </Modal>
+
 
             <Modal
                 isOpen={showClearModal}
@@ -607,6 +825,13 @@ export default function SchedulePage() {
             >
                 Are you sure you want to remove all auto-generated study blocks?
             </Modal>
+            {toast && (
+                <Toast
+                    message={toast.message}
+                    type={toast.type}
+                    onClose={() => setToast(null)}
+                />
+            )}
         </main>
     );
 }

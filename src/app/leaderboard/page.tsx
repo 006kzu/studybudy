@@ -41,7 +41,7 @@ export default function LeaderboardPage() {
     }, []);
 
     return (
-        <main className="container">
+        <main className="container" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 16px)' }}>
             <header style={{ marginBottom: '24px', textAlign: 'center' }}>
                 <Link href="/dashboard" style={{ float: 'left', textDecoration: 'none', fontSize: '1.5rem' }}>🔙</Link>
                 <h1 className="text-h1">Top Dogs 🏆</h1>
