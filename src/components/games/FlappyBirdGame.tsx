@@ -1,6 +1,12 @@
 'use client';
 
 import React, { useRef, useEffect, useState } from 'react';
+import { useApp } from '@/context/AppContext';
+import { AdMobService } from '@/lib/admob';
+import { useRouter } from 'next/navigation';
+import { BreakEndedModal } from '@/components/games/BreakEndedModal';
+import { GameOverModal } from '@/components/games/GameOverModal';
+import { LeaderboardPlacementPopup } from '@/components/games/LeaderboardPlacementPopup';
 
 type FlappyBirdProps = {
     avatarSrc: string;
@@ -8,9 +14,13 @@ type FlappyBirdProps = {
 };
 
 export default function FlappyBirdGame({ avatarSrc, onExit, timeLeft }: FlappyBirdProps & { timeLeft: number }) {
+    const { state, recordSession, extendBreak, updateHighScore, submitGameScore } = useApp();
+    const router = useRouter();
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [gameState, setGameState] = useState<'START' | 'PLAY' | 'GAME_OVER'>('START');
     const [highScore, setHighScore] = useState(0);
+    const [isNewRecord, setIsNewRecord] = useState(false);
+    const [leaderboardRank, setLeaderboardRank] = useState<number | null>(null);
 
     // Refs for Game State
     const scoreVal = useRef(0);
@@ -33,9 +43,9 @@ export default function FlappyBirdGame({ avatarSrc, onExit, timeLeft }: FlappyBi
         img.src = avatarSrc;
         birdImg.current = img;
 
-        // Load high score
-        const saved = localStorage.getItem('flappy_highscore');
-        if (saved) setHighScore(parseInt(saved));
+        // Load high score from AppContext (prefer this over localStorage for consistency)
+        const savedHigh = state.highScores['flappy-bird'] || 0;
+        setHighScore(savedHigh);
 
         // Dynamic Canvas Logic
         const handleResize = () => {
@@ -193,11 +203,7 @@ export default function FlappyBirdGame({ avatarSrc, onExit, timeLeft }: FlappyBi
     // Internal timer removed. Using props.timeLeft
 
     // Check for Time's Up
-    useEffect(() => {
-        if (timeLeft === 0 && gameState !== 'PLAY') {
-            onExit(scoreVal.current * 10);
-        }
-    }, [timeLeft, gameState, onExit]);
+    // Removed auto-exit logic. Let game finish.
 
     // Format time mm:ss
     const formatTime = (s: number) => {
@@ -208,16 +214,22 @@ export default function FlappyBirdGame({ avatarSrc, onExit, timeLeft }: FlappyBi
 
     const handleGameOver = () => {
         setGameState('GAME_OVER');
-        if (scoreVal.current > highScore) {
+        const currentHigh = state.highScores['flappy-bird'] || 0;
+        if (scoreVal.current > currentHigh) {
             setHighScore(scoreVal.current);
-            localStorage.setItem('flappy_highscore', scoreVal.current.toString());
+            setIsNewRecord(true);
+            updateHighScore('flappy-bird', scoreVal.current);
         }
+        // Submit to global leaderboard
+        submitGameScore('flappy-bird', scoreVal.current).then(rank => {
+            if (rank !== null) {
+                setLeaderboardRank(rank);
+            }
+        });
         if (reqRef.current) cancelAnimationFrame(reqRef.current);
 
         // If time is up, exit immediately instead of showing game over screen
-        if (timeLeft === 0) {
-            onExit(scoreVal.current * 10);
-        }
+        // CHANGED: Do not exit. Show Game Over screen (which will block retry).
     };
 
     const handleInput = () => {
@@ -272,7 +284,7 @@ export default function FlappyBirdGame({ avatarSrc, onExit, timeLeft }: FlappyBi
                 top: 'calc(env(safe-area-inset-top) + 20px)',
                 left: '50%',
                 transform: 'translateX(-50%)',
-                background: timeLeft < 30 ? 'rgba(231, 76, 60, 0.8)' : 'rgba(0,0,0,0.5)',
+                background: timeLeft <= 0 ? '#e74c3c' : (timeLeft <= 30 ? '#e74c3c' : 'rgba(0,0,0,0.5)'),
                 color: 'white',
                 padding: '8px 16px',
                 borderRadius: '20px',
@@ -287,31 +299,31 @@ export default function FlappyBirdGame({ avatarSrc, onExit, timeLeft }: FlappyBi
             {/* UI Overlays */}
             {gameState === 'START' && (
                 <div style={{ position: 'absolute', top: '40%', left: 0, right: 0, color: 'white', textAlign: 'center', pointerEvents: 'none' }}>
-                    <h1 style={{ fontSize: '2rem', textShadow: '2px 2px 0 #000' }}>Flappy Study</h1>
+                    <h1 style={{ fontSize: '2rem', textShadow: '2px 2px 0 #000' }}>Flappy Buddies</h1>
                     <p>Tap to Jump</p>
                     <p style={{ marginTop: '20px', fontSize: '1.2rem', animation: 'pulse 1s infinite' }}>Tap to Start</p>
                 </div>
             )}
 
             {gameState === 'GAME_OVER' && (
-                <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', color: 'white', textAlign: 'center', background: 'rgba(0,0,0,0.8)', padding: '32px', borderRadius: '16px', minWidth: '300px' }}>
-                    <h2 style={{ fontSize: '2rem', color: '#e74c3c' }}>Game Over!</h2>
-                    <div style={{ display: 'flex', gap: '20px', justifyContent: 'center', margin: '20px 0' }}>
-                        <div style={{ background: '#ecf0f1', padding: '10px', borderRadius: '8px', color: '#333' }}>
-                            <div style={{ fontSize: '0.8rem' }}>SCORE</div>
-                            <div style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>{scoreVal.current}</div>
-                        </div>
-                        <div style={{ background: '#f1c40f', padding: '10px', borderRadius: '8px', color: '#333' }}>
-                            <div style={{ fontSize: '0.8rem' }}>BEST</div>
-                            <div style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>{highScore}</div>
-                        </div>
-                    </div>
-                    {timeLeft > 0 && (
-                        <button className="btn btn-primary" onClick={(e) => { e.stopPropagation(); startGame(); }} style={{ width: '100%', marginBottom: '0', padding: '12px' }}>
-                            Try Again 🔄
-                        </button>
-                    )}
-                </div>
+                timeLeft <= 0 ? (
+                    <BreakEndedModal
+                        canWatchAd={!state.breakTimer.hasClaimedAd}
+                        onWatchAd={async () => {
+                            await extendBreak(1);
+                            // No reload needed; state update will close modal
+                        }}
+                        onExit={() => router.push('/study')}
+                    />
+                ) : (
+                    <GameOverModal
+                        score={scoreVal.current}
+                        highScore={state.highScores['flappy-bird'] || 0}
+                        isNewRecord={isNewRecord}
+                        onRestart={() => { setIsNewRecord(false); setGameState('START'); scoreVal.current = 0; }}
+                        onBackToStudy={() => onExit(scoreVal.current * 10)}
+                    />
+                )
             )}
 
             {/* Exit Button (Always visible) - Moved to LEFT */}
@@ -321,21 +333,37 @@ export default function FlappyBirdGame({ avatarSrc, onExit, timeLeft }: FlappyBi
                     position: 'absolute',
                     top: 'calc(env(safe-area-inset-top) + 20px)',
                     left: '20px',
-                    background: 'rgba(0,0,0,0.5)',
-                    color: 'white',
-                    border: 'none',
+                    background: 'rgba(0,0,0,0.2)',
+                    color: 'rgba(255,255,255,0.8)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    backdropFilter: 'blur(4px)',
                     padding: '8px 16px',
                     borderRadius: '20px',
                     cursor: 'pointer',
-                    zIndex: 100
+                    zIndex: 100,
+                    fontSize: '0.9rem',
+                    fontWeight: 'bold',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
                 }}
             >
-                ✕ Exit
+                <span>←</span> Exit
             </button>
 
             <style jsx>{`
                 @keyframes pulse { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
             `}</style>
+
+            {/* Leaderboard Placement Popup */}
+            {leaderboardRank !== null && (
+                <LeaderboardPlacementPopup
+                    rank={leaderboardRank}
+                    score={scoreVal.current}
+                    gameName="Flappy Buddies"
+                    onClose={() => setLeaderboardRank(null)}
+                />
+            )}
         </div>
     );
 }

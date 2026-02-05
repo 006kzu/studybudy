@@ -15,13 +15,17 @@ import { AVATARS } from '@/constants/avatars';
 import { Suspense } from 'react';
 import Modal from '@/components/Modal';
 import FlappyBirdGame from '@/components/games/FlappyBirdGame';
+import ShareProgressModal from '@/components/ShareProgressModal';
 
 function StudyPageContent() {
-    const { state, recordSession, user, scheduleStudyNotification, cancelStudyNotification } = useApp();
+    const { state, recordSession, user, scheduleStudyNotification, cancelStudyNotification, startBreak, saveActiveSession, clearActiveSession, isLoading } = useApp();
     const searchParams = useSearchParams();
     const router = useRouter();
 
-    const classId = searchParams.get('classId');
+    const paramClassId = searchParams.get('classId');
+    // Prefer URL param, but fall back to active session if available (refresh resilience)
+    const classId = paramClassId || state.activeSession?.classId;
+
     const [seconds, setSeconds] = useState(0);
     const [isActive, setIsActive] = useState(true);
     const [finished, setFinished] = useState(false);
@@ -45,7 +49,7 @@ function StudyPageContent() {
 
     // Get User Avatar
     const userAvatarItem = AVATARS.find(a => a.name === state.equippedAvatar);
-    const userAvatarSrc = userAvatarItem ? userAvatarItem.filename : '/assets/run.png';
+    const userAvatarSrc = userAvatarItem ? userAvatarItem.filename : '/assets/idle.png';
 
     // Calculate Weekly Progress
     const getStartOfWeek = () => {
@@ -145,11 +149,18 @@ function StudyPageContent() {
         }
     }, [seconds, isActive, finished]);
 
-    // Passive Animation Loop (Parallax / Floating)
+    // Passive Animation Loop (Parallax / Floating) - Throttled to 30fps for performance
     useEffect(() => {
-        const loop = () => {
-            if (isActive && !finished && !isPlayingGame) {
-                setScrollOffset(prev => prev + 1); // Slow 1px/frame scroll
+        let lastTime = 0;
+        const targetFPS = 30;
+        const frameTime = 1000 / targetFPS;
+
+        const loop = (currentTime: number) => {
+            if (currentTime - lastTime >= frameTime) {
+                if (isActive && !finished && !isPlayingGame) {
+                    setScrollOffset(prev => prev + 2); // Move 2px per frame at 30fps (same speed as 1px at 60fps)
+                }
+                lastTime = currentTime;
             }
             animationRef.current = requestAnimationFrame(loop);
         };
@@ -205,10 +216,7 @@ function StudyPageContent() {
     }, [isActive, finished, isPlayingGame, seconds]); // 'seconds' added to catch time jumps
 
     const endSession = async () => {
-        setIsActive(false);
-        setFinished(true);
-
-        // Award Points based on time: 0.46 points per second
+        // Navigate FIRST to avoid flash of paused UI
         const timePoints = Math.floor(seconds * 0.46);
 
         // Weekly Bonus Check
@@ -218,7 +226,6 @@ function StudyPageContent() {
             const newSessionMinutes = Math.ceil(seconds / 60);
             const goal = targetClass.weeklyGoalMinutes;
 
-            // Check if we crossed the goal line this specific session
             if (currentTotal < goal && (currentTotal + newSessionMinutes) >= goal) {
                 bonusPoints = 100;
             }
@@ -226,8 +233,19 @@ function StudyPageContent() {
 
         const totalPoints = timePoints + gameCoins + bonusPoints;
 
+        // Navigate immediately
         if (targetClass) {
-            // Save
+            router.replace(`/dashboard?earned=${totalPoints}&winner=true`);
+        } else {
+            router.replace('/dashboard');
+        }
+
+        // Then update state and save session (happens after navigation starts)
+        setIsActive(false);
+        setFinished(true);
+        clearActiveSession();
+
+        if (targetClass) {
             await recordSession({
                 id: generateUUID(),
                 classId: targetClass.id,
@@ -235,11 +253,6 @@ function StudyPageContent() {
                 timestamp: Date.now(),
                 pointsEarned: totalPoints
             });
-
-            // Redirect to Dashboard (Winner is always true now since there are no bots)
-            router.push(`/dashboard?earned=${totalPoints}&winner=true`);
-        } else {
-            router.push('/dashboard');
         }
     };
 
@@ -296,6 +309,10 @@ function StudyPageContent() {
         setSeconds(1495); // 5 seconds before 25m
     };
 
+    const devSetTimeAlmost2Hours = () => {
+        setSeconds(7195); // 5 seconds before 2 hours (1hr 59m 55s)
+    };
+
     // AdMob Effect - Only run if valid class
     useEffect(() => {
         if (isClassInvalid) return;
@@ -323,37 +340,13 @@ function StudyPageContent() {
         };
     }, [isPremium, isPlayingGame, isClassInvalid]);
 
-    // Early Return for Invalid Class (Check executed after all hooks)
-    if (isClassInvalid) return <div className="container">Class not found</div>;
-
-    const handlePlayGame = async () => {
-        setIsActive(false); // Ensure timer is paused
-        setShowBreakModal(false); // Close break modal if open
-
-        if (isPremium) {
-            setIsPlayingGame(true);
-        } else {
-            // Intercept with Upsell Modal
-            setShowAdUpsell(true);
+    // Restore Timer State on Mount if Resuming
+    useEffect(() => {
+        if (state.activeSession && state.activeSession.classId === classId) {
+            console.log("Restoring session time:", state.activeSession.elapsedSeconds);
+            setSeconds(state.activeSession.elapsedSeconds);
         }
-    };
-
-    const handleWatchAdAndPlay = async () => {
-        setShowAdUpsell(false);
-        const { AdMobService } = await import('@/lib/admob');
-        // Show Interstitial or Loading Toast?
-        const watched = await AdMobService.showInterstitial();
-        // If watched or failed (watched=false but we let them play anyway often), start game
-        setIsPlayingGame(true);
-    };
-
-    const handleUpgradeAndPlay = async () => {
-        if (confirm("Purchase Premium for $4.99? (Mock)")) {
-            goPremium();
-            setShowAdUpsell(false);
-            setIsPlayingGame(true); // Instant start!
-        }
-    };
+    }, []); // Run once on mount
 
     // Break Timer Logic
     useEffect(() => {
@@ -375,14 +368,51 @@ function StudyPageContent() {
 
     // Reset Break Props on New Session
     useEffect(() => {
-        // If seconds resets to 0 (or low), assume new session start? 
-        // Actually, better to reset when they click "Start" logic or when session ends.
-        // Let's reset when isActive becomes true (resuming study).
         if (isActive) {
             setBreakExtensionUsed(false);
             setBreakSeconds(300); // Reset to 5 mins
         }
     }, [isActive]);
+
+    // Redirect to dashboard if class is invalid (using useEffect to avoid render-time state update)
+    useEffect(() => {
+        if (!isLoading && isClassInvalid) {
+            router.replace('/dashboard');
+        }
+    }, [isLoading, isClassInvalid, router]);
+
+    // Early Return for Invalid Class (Check executed after all hooks)
+    if (isLoading) return <div className="container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>Loading Session...</div>;
+    if (isClassInvalid) return null; // Redirect is handled by useEffect above
+
+    const handlePlayGame = async () => {
+        setIsActive(false); // Ensure timer is paused
+        setShowBreakModal(false); // Close break modal if open
+
+        if (isPremium) {
+            setIsPlayingGame(true);
+        } else {
+            // Intercept with Upsell Modal
+            setShowAdUpsell(true);
+        }
+    };
+
+    const handleWatchAdAndPlay = async () => {
+        setShowAdUpsell(false);
+        const { AdMobService } = await import('@/lib/admob');
+        // Show Interstitial (or Reward if forced for game entry)
+        const watched = await AdMobService.showInterstitial();
+        // Redirect to Games Hub
+        router.push('/games');
+    };
+
+    const handleUpgradeAndPlay = async () => {
+        if (confirm("Purchase Premium for $4.99? (Mock)")) {
+            goPremium();
+            setShowAdUpsell(false);
+            router.push('/games'); // Instant access
+        }
+    };
 
     const handleWatchReward = async () => {
         const { AdMobService } = await import('@/lib/admob');
@@ -403,26 +433,6 @@ function StudyPageContent() {
             {/* If Playing Game, show FULL SCREEN overlay */}
             {isPlayingGame && (
                 <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 2000 }}>
-                    {/* Dev Tool: Break End Button - Positioned in top-right over game */}
-                    <button
-                        onClick={() => setBreakSeconds(5)}
-                        style={{
-                            position: 'absolute',
-                            top: '60px',
-                            right: '20px',
-                            zIndex: 3000,
-                            padding: '8px 12px',
-                            background: 'red',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '8px',
-                            fontWeight: 'bold',
-                            fontSize: '0.8rem',
-                            opacity: 0.8
-                        }}
-                    >
-                        ⏩ End Break
-                    </button>
                     <FlappyBirdGame
                         avatarSrc={userAvatarSrc}
                         timeLeft={breakSeconds}
@@ -464,26 +474,9 @@ function StudyPageContent() {
                     {/* Right: Actions */}
                     <div style={{ display: 'flex', gap: '12px', pointerEvents: 'auto' }}>
                         {/* Music Toggle */}
-                        <button
-                            onClick={() => updateSettings({ musicEnabled: !musicEnabled })}
-                            style={{
-                                background: 'rgba(255,255,255,0.95)',
-                                border: 'none',
-                                width: '48px',
-                                height: '48px',
-                                borderRadius: '50%',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                cursor: 'pointer',
-                                boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                                fontSize: '1.4rem',
-                                transition: 'transform 0.1s'
-                            }}
-                            title={musicEnabled ? "Mute Music" : "Play Music"}
-                        >
-                            {musicEnabled ? '🎵' : '🔇'}
-                        </button>
+
+
+
 
                         {/* End Session */}
                         <button
@@ -695,17 +688,20 @@ function StudyPageContent() {
             </div>
             {/* Ad Banner Placeholder Removed per user request */}
 
-            {/* Dev Tools - Hidden in corner */}
-            <div style={{ position: 'fixed', top: 'calc(env(safe-area-inset-top) + 50px)', right: '10px', opacity: 0.8, zIndex: 1000, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px', background: 'rgba(0,0,0,0.5)', padding: '4px', color: 'white', fontSize: '10px' }}>
-                <button onClick={devSetTimeAlmost25}>⏩ 24:55</button>
-                <button onClick={() => setSeconds(7195)}>⏩ 1:59:55</button>
-                <button onClick={() => setBreakSeconds(5)}>⏩ Break End</button>
-                <div>Goal: {targetClass?.weeklyGoalMinutes}</div>
-                <div>Weekly: {weeklyMinutes}</div>
-                <div>Session: {Math.ceil(seconds / 60)}</div>
-                <div>Total: {weeklyMinutes + Math.ceil(seconds / 60)}</div>
-                <div>Shown: {hasShownGoalModal ? 'Yes' : 'No'}</div>
-                <div>Premium: {isPremium ? 'YES' : 'NO'}</div>
+            {/* Dev Tools (Centered for Testing) */}
+            <div style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', opacity: 1, zIndex: 100, display: 'flex', gap: '12px', background: 'rgba(0,0,0,0.5)', padding: '12px', borderRadius: '12px' }}>
+                <button
+                    onClick={devSetTimeAlmost25}
+                    style={{ background: 'red', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '0.7rem', border: 'none' }}
+                >
+                    ⏩ FF 25m
+                </button>
+                <button
+                    onClick={devSetTimeAlmost2Hours}
+                    style={{ background: 'purple', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '0.7rem', border: 'none' }}
+                >
+                    ⏩ FF 2hr
+                </button>
             </div>
 
             {/* Break Modal */}
@@ -719,16 +715,17 @@ function StudyPageContent() {
                             setShowBreakModal(false);
                             setIsActive(true);
                         }}>Skip Break</button>
-                        <button className="btn btn-primary" onClick={handlePlayGame}>Play Game! 🎮</button>
+                        <button className="btn btn-primary" onClick={() => {
+                            if (targetClass) saveActiveSession(targetClass.id, seconds);
+                            startBreak(5); // 5 Minutes
+                            handlePlayGame();
+                        }}>Play Game! 🎮</button>
                     </>
                 }
             >
-                You've focused for 25 minutes straight! StudyBudy recommends taking a 5-minute break to recharge properly.
+                You've focused for 25 minutes straight! Learn Loop recommends taking a 5-minute break to recharge properly.
                 <br /><br />
-                Want to play a quick round of Flappy Budy to relax?
-
-                {/* Upsell Removed here as requested, moving to Interstitial flow + keeping text tweak if needed */}
-                {/* Upsell Removed per user request */}
+                Want to play a quick game to relax?
             </Modal>
 
             {/* Pre-Ad Upsell Modal (New) */}
@@ -831,37 +828,25 @@ function StudyPageContent() {
                 </div>
             </Modal>
 
-            {/* Goal Reached Modal */}
-            <Modal
+            {/* Goal Reached Modal - Share Achievement */}
+            <ShareProgressModal
                 isOpen={showGoalModal}
-                onClose={() => setShowGoalModal(false)}
-                title="Goal Reached! 🎉"
-                actions={
-                    <>
-                        <button className="btn btn-secondary" onClick={() => {
-                            setShowGoalModal(false);
-                            setIsActive(true);
-                        }}>Keep Studying</button>
-                        <button className="btn btn-primary" onClick={() => {
-                            setShowGoalModal(false);
-                            endSession();
-                        }}>Finish Session 🏆</button>
-                    </>
-                }
-            >
-                <div style={{ textAlign: 'center' }}>
-                    <p style={{ fontSize: '1.2rem', marginBottom: '16px' }}>
-                        You've hit your weekly goal for <strong>{targetClass.name}</strong>!
-                    </p>
-                    <div style={{ fontSize: '3rem', marginBottom: '16px' }}>💰 +100 Coins</div>
-                    <p style={{ color: '#27ae60', fontWeight: 'bold', marginBottom: '16px' }}>
-                        Bonus Secured!
-                    </p>
-                    <p>
-                        Want to push further or call it a success for today?
-                    </p>
-                </div>
-            </Modal>
+                onClose={() => {
+                    setShowGoalModal(false);
+                    setIsActive(true);
+                }}
+                className={targetClass?.name || ''}
+                minutesStudied={weeklyMinutes + (seconds / 60)}
+                goalMinutes={targetClass?.weeklyGoalMinutes || 0}
+                onPlayGame={() => {
+                    if (targetClass) saveActiveSession(targetClass.id, seconds);
+                    startBreak(5);
+                    handlePlayGame();
+                }}
+                onContinueStudying={() => {
+                    setIsActive(true);
+                }}
+            />
 
             {/* Zen Mode Guide Modal */}
             {

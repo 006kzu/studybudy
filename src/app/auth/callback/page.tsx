@@ -4,6 +4,15 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
+import { Browser } from '@capacitor/browser';
+
+const closeBrowserSafely = async () => {
+    try {
+        await Browser.close();
+    } catch (e) {
+        // Browser may not be open or we're on web; safe to ignore
+    }
+};
 
 function AuthCallbackContent() {
     const router = useRouter();
@@ -27,12 +36,14 @@ function AuthCallbackContent() {
                 const { error } = await supabase.auth.exchangeCodeForSession(code);
                 if (!error) {
                     setMsg('Success! Redirecting...');
+                    await closeBrowserSafely();
                     router.replace(next);
                 } else {
                     // It's possible the code was already consumed by auto-detect. Check session.
                     const { data: { session } } = await supabase.auth.getSession();
                     if (session) {
                         setMsg('Session active! Redirecting...');
+                        await closeBrowserSafely();
                         router.replace(next);
                     } else {
                         setMsg(`Authentication failed: ${error.message}`);
@@ -44,6 +55,7 @@ function AuthCallbackContent() {
                 const { data: { session } } = await supabase.auth.getSession();
                 if (session) {
                     setMsg('Already logged in. Redirecting...');
+                    await closeBrowserSafely();
                     router.replace(next);
                 } else {
                     // No session, no code.

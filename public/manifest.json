@@ -1,6 +1,6 @@
 {
-    "name": "Study Budy",
-    "short_name": "StudyBudy",
+    "name": "Learn Loop",
+    "short_name": "Learn Loop",
     "description": "Gamified Study Tracker",
     "start_url": "/",
     "display": "standalone",

@@ -2,14 +2,18 @@
 
 import { useApp } from '@/context/AppContext';
 import { useState } from 'react';
+import { purchaseItem } from '@/lib/iap';
 import Link from 'next/link';
 
 // ...
 import Modal from '@/components/Modal';
+import ParentalGate from '@/components/ParentalGate';
 
 export default function SettingsPage() {
-    const { state, updateSettings, testNotification, signOut, user, archiveAllClasses, scheduleClassReminders, cancelClassReminders, goPremium } = useApp();
+    const { state, updateSettings, testNotification, signOut, user, archiveAllClasses, scheduleClassReminders, cancelClassReminders, goPremium, deleteAccount } = useApp();
     const [showSemesterModal, setShowSemesterModal] = useState(false);
+    const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
+    const [showParentalGate, setShowParentalGate] = useState(false);
 
     // Local state for UI feedback before persisting (or direct persist if fast enough)
     // We'll assume updateSettings persists to Context/LocalStorage
@@ -60,9 +64,7 @@ export default function SettingsPage() {
                                 boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
                             }}
                             onClick={() => {
-                                if (confirm("Purchase Premium for $4.99? (Mock)")) {
-                                    goPremium?.();
-                                }
+                                setShowParentalGate(true);
                             }}
                         >
                             $4.99
@@ -100,24 +102,7 @@ export default function SettingsPage() {
                     </label>
                 </div>
 
-                {state.notifications?.studyBreaksEnabled && (
-                    <div style={{ marginTop: '12px', padding: '12px', background: '#f9f9f9', borderRadius: '8px', marginBottom: '12px' }}>
-                        <button
-                            onClick={testNotification}
-                            className="btn"
-                            style={{
-                                width: '100%',
-                                padding: '8px',
-                                background: '#fff',
-                                border: '1px solid #ccc',
-                                color: '#333',
-                                fontSize: '0.9rem'
-                            }}
-                        >
-                            Test Notification (6s delay)
-                        </button>
-                    </div>
-                )}
+
 
                 {/* Class Reminders */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 0' }}>
@@ -241,30 +226,136 @@ export default function SettingsPage() {
                 )}
             </div>
 
-            {user && (
-                <div className="card" style={{ marginTop: '24px', border: '1px solid #fee2e2', background: '#fff5f5' }}>
-                    <h2 className="text-h2" style={{ color: '#c53030' }}>🚫 Account</h2>
-                    <p className="text-body" style={{ marginBottom: '16px' }}>
-                        Logged in as: <strong>{user.email}</strong>
-                    </p>
-                    <button
-                        onClick={async () => {
-                            await signOut?.();
-                            window.location.href = '/login';
-                        }}
-                        className="btn"
-                        style={{
-                            width: '100%',
-                            background: '#fff',
-                            border: '1px solid #feb2b2',
-                            color: '#c53030',
-                            fontWeight: 600
-                        }}
-                    >
-                        Sign Out
-                    </button>
-                </div>
-            )}
+            {
+                user && (
+                    <div className="card" style={{ marginTop: '24px', border: '1px solid #fee2e2', background: '#fff' }}>
+                        <h2 className="text-h2" style={{ color: 'var(--color-primary)' }}>👤 Account</h2>
+
+                        <div style={{ marginBottom: '24px' }}>
+                            <p className="text-body" style={{ marginBottom: '8px', fontWeight: 600 }}>Your Student ID</p>
+                            <div style={{
+                                background: '#f5f5f5',
+                                padding: '12px',
+                                borderRadius: '8px',
+                                fontFamily: 'monospace',
+                                fontSize: '0.9rem',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                border: '1px solid #e5e5e5'
+                            }}>
+                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginRight: '8px' }}>
+                                    {user.id}
+                                </span>
+                                <button
+                                    onClick={() => {
+                                        const text = user.id;
+                                        const copyFallback = () => {
+                                            try {
+                                                const textArea = document.createElement("textarea");
+                                                textArea.value = text;
+                                                // Avoid scrolling to bottom
+                                                textArea.style.top = "0";
+                                                textArea.style.left = "0";
+                                                textArea.style.position = "fixed";
+                                                document.body.appendChild(textArea);
+                                                textArea.focus();
+                                                textArea.select();
+                                                const successful = document.execCommand('copy');
+                                                document.body.removeChild(textArea);
+                                                if (successful) alert('ID copied!');
+                                                else throw new Error('Copy failed');
+                                            } catch (err) {
+                                                prompt('Copy your ID manually:', text);
+                                            }
+                                        };
+
+                                        if (navigator.clipboard) {
+                                            navigator.clipboard.writeText(text).then(() => {
+                                                alert('ID copied!');
+                                            }).catch(copyFallback);
+                                        } else {
+                                            copyFallback();
+                                        }
+                                    }}
+                                    className="btn"
+                                    style={{ padding: '4px 8px', fontSize: '0.8rem', background: 'white', border: '1px solid #ddd' }}
+                                >
+                                    Copy
+                                </button>
+                            </div>
+                            <p style={{ fontSize: '0.8rem', color: '#666', marginTop: '8px' }}>
+                                Share this ID (or the link below) with your parent so they can automatically link to your account.
+                            </p>
+
+                            <button
+                                onClick={() => {
+                                    const link = `${window.location.origin}/link?studentId=${user.id}`;
+                                    const message = `Connect to my Study Budy account: ${link} \n\nOr enter ID: ${user.id}`;
+
+                                    if (navigator.share) {
+                                        navigator.share({
+                                            title: 'Connect to Study Budy',
+                                            text: message,
+                                            url: link
+                                        }).catch(console.error);
+                                    } else {
+                                        // Fallback to copy
+                                        navigator.clipboard.writeText(message);
+                                        alert('Invite link copied to clipboard!');
+                                    }
+                                }}
+                                className="btn btn-primary"
+                                style={{
+                                    display: 'block',
+                                    width: '100%',
+                                    marginTop: '12px',
+                                }}
+                            >
+                                🔗 Invite Parent
+                            </button>
+                        </div>
+
+                        <div style={{ borderTop: '1px solid #eee', paddingTop: '16px' }}>
+                            <p className="text-body" style={{ marginBottom: '16px' }}>
+                                Logged in as: <strong>{user.email}</strong>
+                            </p>
+                            <button
+                                onClick={async () => {
+                                    await signOut?.();
+                                    window.location.href = '/login';
+                                }}
+                                className="btn"
+                                style={{
+                                    width: '100%',
+                                    background: '#fff',
+                                    border: '1px solid #feb2b2',
+                                    color: '#c53030',
+                                    fontWeight: 600
+                                }}
+                            >
+                                Sign Out
+                            </button>
+
+                            <button
+                                onClick={() => setShowDeleteAccountModal(true)}
+                                className="btn"
+                                style={{
+                                    width: '100%',
+                                    marginTop: '12px',
+                                    background: '#fee2e2',
+                                    border: '1px solid #f87171',
+                                    color: '#991b1b',
+                                    fontWeight: 600,
+                                    fontSize: '0.9rem'
+                                }}
+                            >
+                                Delete Account
+                            </button>
+                        </div>
+                    </div>
+                )
+            }
 
             <div className="card" style={{ marginTop: '24px' }}>
                 <h2 className="text-h2">🎓 Semester Management</h2>
@@ -317,8 +408,62 @@ export default function SettingsPage() {
                 </p>
             </Modal>
 
+            {/* Delete Account Confirmation Modal */}
+            <Modal
+                isOpen={showDeleteAccountModal}
+                onClose={() => setShowDeleteAccountModal(false)}
+                title="Delete Account?"
+                type="danger"
+                actions={
+                    <>
+                        <button className="btn btn-secondary" onClick={() => setShowDeleteAccountModal(false)}>Cancel</button>
+                        <button
+                            className="btn"
+                            style={{ background: '#dc2626', color: 'white' }}
+                            onClick={async () => {
+                                if (confirm("Are you absolutely sure? This cannot be undone.")) {
+                                    await deleteAccount?.();
+                                }
+                            }}
+                        >
+                            Confirm Delete
+                        </button>
+                    </>
+                }
+            >
+                <p>
+                    <strong>Warning: This action is permanent!</strong>
+                </p>
+                <p style={{ marginTop: '12px' }}>
+                    Deleting your account will:
+                </p>
+                <ul style={{ paddingLeft: '20px', marginTop: '8px', color: '#666' }}>
+                    <li>Delete your profile and points</li>
+                    <li>Delete all your classes and schedule</li>
+                    <li>Delete your study history</li>
+                    <li>Cancel your subscription (if applicable)</li>
+                </ul>
+            </Modal>
+
+            <ParentalGate
+                isOpen={showParentalGate}
+                onClose={() => setShowParentalGate(false)}
+                onSuccess={async () => {
+                    try {
+                        const success = await purchaseItem('premium_upgrade');
+                        if (success) {
+                            await goPremium?.();
+                            alert("Thank you for your support! Premium features unlocked.");
+                        }
+                    } catch (e) {
+                        console.error(e);
+                        alert("Purchase failed.");
+                    }
+                }}
+            />
+
             <div className="text-center" style={{ marginTop: '32px', opacity: 0.5, fontSize: '0.8rem' }}>
-                Study Budy v1.0.0
+                Learn Loop v1.0.0
             </div>
 
             <style jsx>{`
@@ -374,6 +519,6 @@ export default function SettingsPage() {
                     font-size: 1rem;
                 }
             `}</style>
-        </main>
+        </main >
     );
 }

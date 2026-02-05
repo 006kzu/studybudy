@@ -1,4 +1,7 @@
+'use client';
+
 import React, { useEffect } from 'react';
+import ReactDOM from 'react-dom';
 
 type ModalProps = {
     isOpen: boolean;
@@ -10,17 +13,28 @@ type ModalProps = {
 };
 
 export default function Modal({ isOpen, onClose, title, children, actions, type = 'default' }: ModalProps) {
+    const [mounted, setMounted] = React.useState(false);
+
     useEffect(() => {
+        setMounted(true);
         const handleEsc = (e: KeyboardEvent) => {
             if (e.key === 'Escape') onClose();
         };
-        if (isOpen) window.addEventListener('keydown', handleEsc);
-        return () => window.removeEventListener('keydown', handleEsc);
+        if (isOpen) {
+            window.addEventListener('keydown', handleEsc);
+            // Prevent body scroll
+            document.body.style.overflow = 'hidden';
+        }
+        return () => {
+            window.removeEventListener('keydown', handleEsc);
+            document.body.style.overflow = 'unset';
+        };
     }, [isOpen, onClose]);
 
-    if (!isOpen) return null;
+    if (!isOpen || !mounted) return null;
 
-    return (
+    // Use Portal to escape any parent transforms/z-indexes
+    return ReactDOM.createPortal(
         <div style={{
             position: 'fixed',
             top: 0, left: 0, right: 0, bottom: 0,
@@ -29,21 +43,23 @@ export default function Modal({ isOpen, onClose, title, children, actions, type 
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            zIndex: 1000,
-            animation: 'fadeIn 0.2s ease-out'
+            zIndex: 10000 // Higher Z
         }} onClick={onClose}>
             <div style={{
+                position: 'relative',
+                zIndex: 10001,
                 background: 'white',
                 width: '90%',
                 maxWidth: '400px',
                 borderRadius: '24px',
                 padding: '24px',
                 boxShadow: '0 20px 50px -10px rgba(0,0,0,0.3)',
-                transform: 'scale(1)',
-                animation: 'scaleIn 0.2s ease-out',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: '16px'
+                gap: '16px',
+                opacity: 1,
+                maxHeight: '90vh',
+                overflowY: 'auto'
             }} onClick={e => e.stopPropagation()}>
 
                 <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -68,10 +84,7 @@ export default function Modal({ isOpen, onClose, title, children, actions, type 
                     </div>
                 )}
             </div>
-            <style jsx>{`
-                @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-                @keyframes scaleIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-            `}</style>
-        </div>
+        </div>,
+        document.body
     );
 }

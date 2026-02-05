@@ -61,9 +61,13 @@ export default function StatsPage() {
             // Filter out classes with 0 minutes if you want clean chart, or keep them to show what is neglected.
             // Keeping them is good for "what to study next".
             .filter(item => {
-                // Should we hide archived classes if they have 0 minutes? Yes.
                 const cls = state.classes.find(c => c.id === item.classId);
-                if (cls?.isArchived && item.minutes === 0) return false;
+
+                // Filter out unknown classes
+                if (!cls) return false;
+
+                // Should we hide archived classes if they have 0 minutes? Yes.
+                if (cls.isArchived && item.minutes === 0) return false;
                 return true;
             })
             .sort((a, b) => b.minutes - a.minutes); // Sort by most studied
@@ -73,8 +77,8 @@ export default function StatsPage() {
     // Simple milestones for now
     const achievements = [
         // Easy / Starter
-        { id: 'first_step', title: 'First Step', desc: 'Study for 15 minutes', thresholdMin: 15, icon: '🐣' },
-        { id: 'scholar', title: 'Scholar', desc: 'Study for 10 hours', thresholdMin: 600, icon: '🎓' },
+        { id: 'first_step', title: 'First Step', desc: 'Study for 15 minutes', thresholdMin: 15, icon: <img src="/icons/icon_achievements_first_step.png" alt="First Step" style={{ width: '72px', height: '72px' }} /> },
+        { id: 'scholar', title: 'Scholar', desc: 'Study for 10 hours', thresholdMin: 600, icon: <img src="/icons/icon_achievements_scholar.png" alt="Scholar" style={{ width: '72px', height: '72px' }} /> },
 
         // Hours Milestones
         { id: 'dedicated', title: 'Dedicated', desc: 'Study for 50 hours', thresholdMin: 3000, icon: '📚' },
@@ -117,12 +121,16 @@ export default function StatsPage() {
             {/* Overview Cards */}
             <section style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '32px' }}>
                 <div className="card text-center">
-                    <div style={{ fontSize: '2rem', marginBottom: '8px' }}>⏱️</div>
+                    <div style={{ marginBottom: '8px' }}>
+                        <img src="/icons/clock.png" alt="Time" style={{ width: '80px', height: '80px' }} />
+                    </div>
                     <div className="text-h2">{totalHours}</div>
                     <div className="text-body" style={{ fontSize: '0.8rem', opacity: 0.7 }}>Total Study Hours</div>
                 </div>
                 <div className="card text-center">
-                    <div style={{ fontSize: '2rem', marginBottom: '8px' }}>💰</div>
+                    <div style={{ marginBottom: '8px' }}>
+                        <img src="/icons/coins.png" alt="Coins" style={{ width: '80px', height: '80px' }} />
+                    </div>
                     <div className="text-h2">{state.points}</div>
                     <div className="text-body" style={{ fontSize: '0.8rem', opacity: 0.7 }}>Lifetime Coins</div>
                 </div>
@@ -220,7 +228,10 @@ export default function StatsPage() {
 
             {/* Achievements */}
             <section>
-                <h2 className="text-h2" style={{ marginBottom: '16px' }}>Achievements</h2>
+                <h2 className="text-h2" style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <img src="/icons/achievements.png" alt="Achievements" style={{ width: '56px', height: '56px' }} />
+                    Achievements
+                </h2>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '16px' }}>
                     {achievements.map(ach => {
                         let isUnlocked = false;

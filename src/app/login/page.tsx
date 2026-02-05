@@ -52,7 +52,7 @@ export default function LoginPage() {
     const handleOAuth = async (provider: 'google' | 'apple') => {
         const isNative = Capacitor.isNativePlatform();
         const redirectTo = isNative
-            ? 'com.studdybuddies.app://google-auth'
+            ? 'com.learnloop.learnloop://callback'
             : `${window.location.origin}/auth/callback?next=/dashboard`;
 
         console.log('OAuth Redirect URL:', redirectTo);
@@ -61,7 +61,11 @@ export default function LoginPage() {
             provider,
             options: {
                 redirectTo,
-                skipBrowserRedirect: true // Always skip auto-redirect to handle it manually/consistently
+                skipBrowserRedirect: true,
+                queryParams: {
+                    access_type: 'offline',
+                    prompt: 'consent select_account',
+                },
             },
         });
 

@@ -10,13 +10,24 @@ import { generateUUID } from '@/lib/uuid';
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
 // HOURS is now dynamic inside component
 
+import { supabase } from '@/lib/supabase';
+
 function OnboardingContent() {
     const { state, addClass, updateClass, addScheduleItem, replaceClassSchedule, completeOnboarding, removeClass } = useApp();
     const router = useRouter();
     const searchParams = useSearchParams();
     const editClassId = searchParams.get('classId');
 
-    const [step, setStep] = useState(1);
+    // If editing or already onboarded (or role is set in DB), skip role selection (Step 0)
+    const initialStep = (editClassId || state.isOnboarded || state.isRoleSet) ? 1 : 0;
+    const [step, setStep] = useState(initialStep);
+
+    // Step 0: Parent/Student Role
+    const [role, setRole] = useState<'student' | 'parent'>('student');
+    const [childEmail, setChildEmail] = useState('');
+    const [linkError, setLinkError] = useState('');
+    const [isStudentSetup, setIsStudentSetup] = useState(false);
+    const [isParentLinking, setIsParentLinking] = useState(false);
 
     // Step 1 State
     const [className, setClassName] = useState('');
@@ -270,255 +281,440 @@ function OnboardingContent() {
         return () => window.removeEventListener('mouseup', handleMouseUp);
     }, []);
 
+
+
+
+    const handleLinkByEmail = async () => {
+        const cleanedId = childEmail.trim();
+        if (!cleanedId) { setLinkError('Please enter an ID'); return; }
+
+        // Validation to prevent hangs on invalid UUIDs
+        const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!UUID_REGEX.test(cleanedId)) {
+            setLinkError('Invalid ID format. Please check the ID in Settings.');
+            return;
+        }
+
+        setIsParentLinking(true);
+        console.log('[Onboarding] Parent Link initiated for ID:', cleanedId);
+
+        try {
+            // Check auth first
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                console.error('[Onboarding] No active user found when linking.');
+                throw new Error('NoUser');
+            }
+
+            // GLOBAL TIMEOUT (10s)
+            await Promise.race([
+                (async () => {
+                    // 1. Verify child exists
+                    const { data: child, error } = await supabase.from('profiles').select('id').eq('id', cleanedId).single();
+                    if (error || !child) throw new Error('ChildNotFound');
+
+                    console.log('[Onboarding] Child found:', child.id);
+
+                    // 2. Update Self
+                    const { error: updateError } = await supabase.from('profiles').update({
+                        role: 'parent',
+                        linked_user_id: child.id,
+                        is_onboarded: true
+                    }).eq('id', user.id);
+
+                    if (updateError) throw updateError;
+
+                    // 3. Complete
+                    await completeOnboarding();
+                    window.location.assign('/parent');
+                })(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 10000))
+            ]);
+
+        } catch (e: any) {
+            console.error('[Onboarding] Link Error:', e);
+            setIsParentLinking(false);
+            if (e.message === 'Timeout') {
+                setLinkError('Connection timed out. Please try again.');
+            } else if (e.message === 'ChildNotFound') {
+                setLinkError('Student ID not found. Check the ID in their Settings.');
+            } else if (e.message === 'NoUser') {
+                setLinkError('Not signed in. Please restart the app or sign in again.');
+            } else {
+                setLinkError('Connection error. Please try again.');
+            }
+        }
+    };
+
+    const handleSkipLinking = async () => {
+        setIsParentLinking(true);
+        try {
+            // Just set role to parent and onboard
+            await completeOnboarding('parent');
+            window.location.assign('/parent');
+        } catch (e) {
+            console.error('Error skipping link:', e);
+            setIsParentLinking(false);
+        }
+    };
+
     return (
         <div className="card animate-fade-in" style={{ width: '95%', maxWidth: '800px', margin: '2vh auto' }}>
-            {step === 1 ? (
-                <>
-                    <h1 className="text-h1 text-center">{editClassId ? 'Edit Class' : 'Class Details'}</h1>
-                    <p className="text-body text-center" style={{ marginBottom: '24px', opacity: 0.7 }}>
-                        Step 1 of 2
-                    </p>
+            {step === 0 && (
+                <div style={{ textAlign: 'center', padding: '20px' }}>
+                    <h1 className="text-h1">Study Buddies</h1>
+                    <p className="text-body" style={{ marginBottom: '32px' }}>How will you use this app?</p>
 
-                    <div style={{ maxWidth: '500px', margin: '0 auto 20px' }}>
-                        <label className="text-body" style={{ display: 'block', marginBottom: '8px' }}>Class Name</label>
-                        <input
-                            type="text"
-                            value={className}
-                            onChange={(e) => setClassName(e.target.value)}
-                            placeholder="e.g. Biology 101"
-                            className="input"
-                            style={{ width: '100%', padding: '12px', fontSize: '1rem', border: '1px solid #ddd', borderRadius: '8px', marginBottom: '16px' }}
-                        />
+                    <div style={{ display: 'flex', gap: '16px', flexDirection: 'column', maxWidth: '400px', margin: '0 auto' }}>
+                        <button
+                            onClick={async () => {
+                                if (isStudentSetup || isParentLinking) return; // Prevent conflicts
+                                setIsStudentSetup(true);
+                                setRole('student');
+                                // Fast-track: Complete onboarding immediately without adding a class
+                                console.log('[Onboarding] Student button clicked. Starting setup...');
+                                try {
+                                    // Race condition: Timeout after 5 seconds to ensure we don't hang
+                                    await Promise.race([
+                                        completeOnboarding('student'),
+                                        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000))
+                                    ]);
+                                    console.log('[Onboarding] Setup complete. Navigating...');
+                                    router.replace('/dashboard');
+                                } catch (e) {
+                                    console.warn('[Onboarding] Setup warning (or timeout):', e);
+                                    // Even if it times out/fails, we force navigation if we believe we are done
+                                    // But let's alert if it's a real error
+                                    if ((e as Error).message === 'Timeout') {
+                                        console.log('[Onboarding] Timed out, forcing dashboard...');
+                                        window.location.href = '/dashboard';
+                                    } else {
+                                        setIsStudentSetup(false);
+                                        console.error('Error completing onboarding:', e);
+                                        alert('Profile setup issue. Redirecting anyway...');
+                                        window.location.href = '/dashboard';
+                                    }
+                                }
+                            }}
+                            className="card"
+                            style={{
+                                padding: '24px',
+                                border: '2px solid var(--color-primary)',
+                                cursor: (isStudentSetup || isParentLinking) ? 'wait' : 'pointer',
+                                background: 'white',
+                                opacity: (isStudentSetup || isParentLinking) ? 0.7 : 1
+                            }}
+                        >
+                            <div style={{ fontSize: '3rem' }}>{isStudentSetup ? '⏳' : '🎓'}</div>
+                            <h3 style={{ margin: '8px 0' }}>{isStudentSetup ? 'Setting up...' : 'I am a Student'}</h3>
+                            <p style={{ fontSize: '0.9rem', color: '#666' }}>I want to track my classes and earn rewards.</p>
+                        </button>
 
-                        <label className="text-body" style={{ display: 'block', marginBottom: '8px' }}>Weekly Study Goal (Hours)</label>
-                        <input
-                            type="number"
-                            value={durationGoal}
-                            onChange={(e) => setDurationGoal(Number(e.target.value))}
-                            min="1"
-                            max="20"
-                            className="input"
-                            style={{ width: '100%', padding: '12px', fontSize: '1rem', border: '1px solid #ddd', borderRadius: '8px', marginBottom: '16px' }}
-                        />
-
-                        <label className="text-body" style={{ display: 'block', marginBottom: '8px' }}>Color Code</label>
-                        <div style={{ display: 'flex', gap: '12px' }}>
-                            {CLASS_COLORS.map((c) => (
-                                <div
-                                    key={c}
-                                    onClick={() => setColor(c)}
-                                    style={{
-                                        width: '40px',
-                                        height: '40px',
-                                        borderRadius: '50%',
-                                        backgroundColor: c,
-                                        cursor: 'pointer',
-                                        border: color === c ? '4px solid var(--color-text-main)' : '2px solid transparent',
-                                        transition: 'transform 0.2s'
-                                    }}
-                                />
-                            ))}
-                        </div>
+                        <button
+                            onClick={() => setRole('parent')}
+                            className="card"
+                            style={{
+                                padding: '24px',
+                                border: role === 'parent' ? '3px solid var(--color-primary)' : '1px solid #ddd',
+                                cursor: 'pointer',
+                                background: role === 'parent' ? '#fff9c4' : 'white'
+                            }}
+                        >
+                            <div style={{ fontSize: '3rem' }}>👨‍👩‍👧‍👦</div>
+                            <h3 style={{ margin: '8px 0' }}>I am a Parent</h3>
+                            <p style={{ fontSize: '0.9rem', color: '#666' }}>I want to gift rewards to my student.</p>
+                        </button>
                     </div>
 
-                    <button
-                        onClick={() => {
-                            const duplicate = state.classes.filter(c => !c.isArchived).find(c =>
-                                c.name.toLowerCase() === className.toLowerCase() && c.id !== editClassId
-                            );
-                            if (duplicate) {
-                                setShowDuplicateModal(true);
-                                return;
-                            }
-                            setStep(2);
-                        }}
-                        className="btn btn-primary"
-                        style={{ width: '100%', marginTop: '24px', maxWidth: '500px', margin: '24px auto', display: 'block' }}
-                        disabled={!className}
-                    >
-                        Next: Class Times
-                    </button>
+                    {role === 'parent' && (
+                        <div style={{ marginTop: '32px', textAlign: 'left', maxWidth: '400px', margin: '32px auto 0' }}>
+                            <h3 className="text-h3">Link to Student</h3>
+                            <p style={{ fontSize: '0.85rem', color: '#666', marginBottom: '16px' }}>
+                                Enter your child's <strong>Student ID</strong>. They can find this in <em>Settings → Account</em>.
+                            </p>
 
-                    {editClassId && (
-                        <button
-                            onClick={() => setShowDeleteModal(true)}
-                            className="btn"
-                            style={{ background: 'transparent', border: 'none', color: 'var(--color-error)', width: '100%', maxWidth: '500px', margin: '0 auto', display: 'block', textDecoration: 'underline' }}
-                        >
-                            Delete This Class
-                        </button>
-                    )}
+                            <input
+                                type="text"
+                                placeholder="e.g. 550e8400-e29b..."
+                                value={childEmail}
+                                onChange={e => setChildEmail(e.target.value)}
+                                style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #ccc', marginBottom: '8px' }}
+                            />
 
-                    {!editClassId && (
-                        <button
-                            onClick={() => router.push('/dashboard')}
-                            className="btn"
-                            style={{ background: 'transparent', border: 'none', color: '#666', width: '100%', maxWidth: '500px', margin: '8px auto', display: 'block', textDecoration: 'underline' }}
-                        >
-                            Cancel
-                        </button>
-                    )}
+                            {linkError && <p style={{ color: 'red', fontSize: '0.9rem' }}>{linkError}</p>}
 
-                    {showDuplicateModal && (
-                        <div style={{
-                            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-                            background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100
-                        }} onClick={() => setShowDuplicateModal(false)}>
-                            <div style={{ background: 'white', padding: '24px', borderRadius: '16px', textAlign: 'center', width: '90%', maxWidth: '300px' }} onClick={e => e.stopPropagation()}>
-                                <h3 className="text-h2" style={{ marginTop: 0 }}>Class Exists</h3>
-                                <p className="text-body" style={{ marginBottom: '24px' }}>
-                                    name <strong>{className}</strong> taken.
-                                </p>
-                                <button onClick={() => setShowDuplicateModal(false)} className="btn btn-primary">Okay</button>
+                            <div style={{ display: 'flex', gap: '12px', marginTop: '16px' }}>
+                                <button
+                                    onClick={handleLinkByEmail}
+                                    disabled={isParentLinking}
+                                    className="btn btn-primary"
+                                    style={{ flex: 2 }}
+                                >
+                                    {isParentLinking ? 'Linking...' : 'Link Account'}
+                                </button>
+                                <button
+                                    onClick={handleSkipLinking}
+                                    disabled={isParentLinking}
+                                    className="btn"
+                                    style={{ flex: 1, background: '#f5f5f5', color: '#666' }}
+                                >
+                                    Later
+                                </button>
                             </div>
                         </div>
                     )}
-                </>
-            ) : (
-                <>
-                    <p className="text-body text-center" style={{ marginBottom: '8px', opacity: 0.7 }}>Step 2 of 2</p>
-                    <h1 className="text-h1 text-center">When is this class?</h1>
-                    <p className="text-body text-center" style={{ marginBottom: '16px', opacity: 0.7 }}>
-                        Tap & Drag to paint time blocks
-                    </p>
+                </div>
+            )}
+
+            {step > 0 && (
+                step === 1 ? (
+                    <>
+                        <h1 className="text-h1 text-center">{editClassId ? 'Edit Class' : 'Class Details'}</h1>
+                        <p className="text-body text-center" style={{ marginBottom: '24px', opacity: 0.7 }}>
+                            Step 1 of 2
+                        </p>
+
+                        <div style={{ maxWidth: '500px', margin: '0 auto 20px' }}>
+                            <label className="text-body" style={{ display: 'block', marginBottom: '8px' }}>Class Name</label>
+                            <input
+                                type="text"
+                                value={className}
+                                onChange={(e) => setClassName(e.target.value)}
+                                placeholder="e.g. Biology 101"
+                                className="input"
+                                style={{ width: '100%', padding: '12px', fontSize: '1rem', border: '1px solid #ddd', borderRadius: '8px', marginBottom: '16px' }}
+                            />
+
+                            <label className="text-body" style={{ display: 'block', marginBottom: '8px' }}>Weekly Study Goal (Hours)</label>
+                            <input
+                                type="number"
+                                value={durationGoal}
+                                onChange={(e) => setDurationGoal(Number(e.target.value))}
+                                min="1"
+                                max="20"
+                                className="input"
+                                style={{ width: '100%', padding: '12px', fontSize: '1rem', border: '1px solid #ddd', borderRadius: '8px', marginBottom: '16px' }}
+                            />
+
+                            <label className="text-body" style={{ display: 'block', marginBottom: '8px' }}>Color Code</label>
+                            <div style={{ display: 'flex', gap: '12px' }}>
+                                {CLASS_COLORS.map((c) => (
+                                    <div
+                                        key={c}
+                                        onClick={() => setColor(c)}
+                                        style={{
+                                            width: '40px',
+                                            height: '40px',
+                                            borderRadius: '50%',
+                                            backgroundColor: c,
+                                            cursor: 'pointer',
+                                            border: color === c ? '4px solid var(--color-text-main)' : '2px solid transparent',
+                                            transition: 'transform 0.2s'
+                                        }}
+                                    />
+                                ))}
+                            </div>
+                        </div>
+
+                        <button
+                            onClick={() => {
+                                const duplicate = state.classes.filter(c => !c.isArchived).find(c =>
+                                    c.name.toLowerCase() === className.toLowerCase() && c.id !== editClassId
+                                );
+                                if (duplicate) {
+                                    setShowDuplicateModal(true);
+                                    return;
+                                }
+                                setStep(2);
+                            }}
+                            className="btn btn-primary"
+                            style={{ width: '100%', marginTop: '24px', maxWidth: '500px', margin: '24px auto', display: 'block' }}
+                            disabled={!className}
+                        >
+                            Next: Class Times
+                        </button>
+
+                        {editClassId && (
+                            <button
+                                onClick={() => setShowDeleteModal(true)}
+                                className="btn"
+                                style={{ background: 'transparent', border: 'none', color: 'var(--color-error)', width: '100%', maxWidth: '500px', margin: '0 auto', display: 'block', textDecoration: 'underline' }}
+                            >
+                                Delete This Class
+                            </button>
+                        )}
+
+                        {!editClassId && (
+                            <button
+                                onClick={() => router.push('/dashboard')}
+                                className="btn"
+                                style={{ background: 'transparent', border: 'none', color: '#666', width: '100%', maxWidth: '500px', margin: '8px auto', display: 'block', textDecoration: 'underline' }}
+                            >
+                                Cancel
+                            </button>
+                        )}
+
+                        {showDuplicateModal && (
+                            <div style={{
+                                position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                                background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100
+                            }} onClick={() => setShowDuplicateModal(false)}>
+                                <div style={{ background: 'white', padding: '24px', borderRadius: '16px', textAlign: 'center', width: '90%', maxWidth: '300px' }} onClick={e => e.stopPropagation()}>
+                                    <h3 className="text-h2" style={{ marginTop: 0 }}>Class Exists</h3>
+                                    <p className="text-body" style={{ marginBottom: '24px' }}>
+                                        name <strong>{className}</strong> taken.
+                                    </p>
+                                    <button onClick={() => setShowDuplicateModal(false)} className="btn btn-primary">Okay</button>
+                                </div>
+                            </div>
+                        )}
+                    </>
+                ) : (
+                    <>
+                        <p className="text-body text-center" style={{ marginBottom: '8px', opacity: 0.7 }}>Step 2 of 2</p>
+                        <h1 className="text-h1 text-center">When is this class?</h1>
+                        <p className="text-body text-center" style={{ marginBottom: '16px', opacity: 0.7 }}>
+                            Tap & Drag to paint time blocks
+                        </p>
 
 
 
-                    <div
-                        className="calendar-grid"
-                        style={{
-                            display: 'grid',
-                            gridTemplateColumns: '50px repeat(5, 1fr)',
-                            gap: '1px',
-                            userSelect: 'none',
-                            touchAction: 'none', // Critical for drag interactions
-                            background: '#999', // Grid lines (gap color)
-                            border: '1px solid #999',
-                            fontSize: '0.8rem'
-                        }}
-                        onTouchMove={(e) => {
-                            // Custom Touch Drag Logic
-                            // We need to find the element under the finger
-                            const touch = e.touches[0];
-                            const target = document.elementFromPoint(touch.clientX, touch.clientY);
-                            if (target && target instanceof HTMLElement) {
-                                // We store data attributes on the slots to identify them
-                                const day = target.dataset.day;
-                                const hour = target.dataset.hour;
-                                const min = target.dataset.min;
+                        <div
+                            className="calendar-grid"
+                            style={{
+                                display: 'grid',
+                                gridTemplateColumns: '50px repeat(5, 1fr)',
+                                gap: '1px',
+                                userSelect: 'none',
+                                touchAction: 'none', // Critical for drag interactions
+                                background: '#999', // Grid lines (gap color)
+                                border: '1px solid #999',
+                                fontSize: '0.8rem'
+                            }}
+                            onTouchMove={(e) => {
+                                // Custom Touch Drag Logic
+                                // We need to find the element under the finger
+                                const touch = e.touches[0];
+                                const target = document.elementFromPoint(touch.clientX, touch.clientY);
+                                if (target && target instanceof HTMLElement) {
+                                    // We store data attributes on the slots to identify them
+                                    const day = target.dataset.day;
+                                    const hour = target.dataset.hour;
+                                    const min = target.dataset.min;
 
-                                if (day && hour && min) {
-                                    if (isDragging.current) {
-                                        // "Paint" mode - if we started by adding, we add. If removing, we remove.
-                                        // But simple toggle might flicker. 
-                                        // Ideally we know if we are Adding or Removing based on the first touch.
-                                        toggleSlot(day, parseInt(hour), parseInt(min), addMode.current);
+                                    if (day && hour && min) {
+                                        if (isDragging.current) {
+                                            // "Paint" mode - if we started by adding, we add. If removing, we remove.
+                                            // But simple toggle might flicker. 
+                                            // Ideally we know if we are Adding or Removing based on the first touch.
+                                            toggleSlot(day, parseInt(hour), parseInt(min), addMode.current);
+                                        }
                                     }
                                 }
-                            }
-                        }}
-                    >
-                        {/* Header Row */}
-                        <div style={{ background: '#f9f9f9' }}></div>
-                        {DAYS.map(d => (
-                            <div key={d} style={{ background: '#f9f9f9', textAlign: 'center', fontWeight: 'bold', padding: '8px 0', fontSize: '0.8rem' }}>{d}</div>
-                        ))}
+                            }}
+                        >
+                            {/* Header Row */}
+                            <div style={{ background: '#f9f9f9' }}></div>
+                            {DAYS.map(d => (
+                                <div key={d} style={{ background: '#f9f9f9', textAlign: 'center', fontWeight: 'bold', padding: '8px 0', fontSize: '0.8rem' }}>{d}</div>
+                            ))}
 
-                        {/* Grid Rows */}
-                        {HOURS.map(h => (
-                            [0, 15, 30, 45].map((currMin, idx) => (
-                                <div key={`row-${h}-${currMin}`} style={{ display: 'contents' }}>
-                                    {/* Time Label */}
-                                    <div style={{
-                                        background: 'white',
-                                        textAlign: 'right',
-                                        paddingRight: '6px',
-                                        fontSize: '0.7rem',
-                                        color: '#999',
-                                        display: 'flex',
-                                        alignItems: 'start',
-                                        justifyContent: 'flex-end',
-                                        paddingTop: '-6px'
-                                    }}>
-                                        {currMin === 0 ? format12h(h) : ''}
-                                    </div>
-
-                                    {DAYS.map(d => {
-                                        const key = `${d}-${h}:${currMin}`;
-                                        const isSelected = selectedSlots.has(key);
-                                        const isSleep = isSleepTime(h, currMin);
-
-                                        const existingEvent = state.schedule.find(s => {
-                                            if (editClassId && s.classId === editClassId) return false;
-                                            if (s.day !== d) return false;
-                                            const [sH, sM] = s.startTime.split(':').map(Number);
-                                            const [eH, eM] = s.endTime.split(':').map(Number);
-                                            const startVal = sH * 60 + sM;
-                                            const endVal = eH * 60 + eM;
-                                            const currVal = h * 60 + currMin;
-                                            return currVal >= startVal && currVal < endVal;
-                                        });
-
-                                        let style: React.CSSProperties = {
-                                            height: '24px', // Taller touch target
+                            {/* Grid Rows */}
+                            {HOURS.map(h => (
+                                [0, 15, 30, 45].map((currMin, idx) => (
+                                    <div key={`row-${h}-${currMin}`} style={{ display: 'contents' }}>
+                                        {/* Time Label */}
+                                        <div style={{
                                             background: 'white',
-                                            cursor: (existingEvent || isSleep) ? 'not-allowed' : 'pointer',
-                                            opacity: existingEvent ? 0.5 : 1
-                                        };
+                                            textAlign: 'right',
+                                            paddingRight: '6px',
+                                            fontSize: '0.7rem',
+                                            color: '#999',
+                                            display: 'flex',
+                                            alignItems: 'start',
+                                            justifyContent: 'flex-end',
+                                            paddingTop: '-6px'
+                                        }}>
+                                            {currMin === 0 ? format12h(h) : ''}
+                                        </div>
 
-                                        if (isSleep) {
-                                            style.background = '#F3E8FF';
-                                        } else if (existingEvent) {
-                                            const assoc = state.classes.find(c => c.name === existingEvent.label || existingEvent.label?.includes(c.name));
-                                            let bg = assoc ? assoc.color : '#ccc';
-                                            style.background = bg + '40';
-                                        } else if (isSelected) {
-                                            style.background = color;
-                                        }
+                                        {DAYS.map(d => {
+                                            const key = `${d}-${h}:${currMin}`;
+                                            const isSelected = selectedSlots.has(key);
+                                            const isSleep = isSleepTime(h, currMin);
 
-                                        return (
-                                            <div
-                                                key={key}
-                                                // Data attributes for touch-move detection
-                                                data-day={d}
-                                                data-hour={h}
-                                                data-min={currMin}
-                                                // Mouse Events
-                                                onMouseDown={(e) => {
-                                                    if (existingEvent || isSleep) return;
-                                                    e.preventDefault(); // Prevent text select
-                                                    handleMouseDown(d, h, currMin);
-                                                }}
-                                                onMouseEnter={() => !existingEvent && !isSleep && handleMouseEnter(d, h, currMin)}
-                                                // Touch Events
-                                                onTouchStart={(e) => {
-                                                    if (existingEvent || isSleep) return;
-                                                    // Prevent default scroll if we are hitting a valid cell to allow drag
-                                                    // But we might want scroll if we tap? 
-                                                    // "touchAction: none" on the container handles blocking scroll.
-                                                    handleMouseDown(d, h, currMin);
-                                                }}
-                                                // Note: onTouchMove is handled by parent for performance/ correctness
-                                                onClick={() => !existingEvent && !isSleep && toggleSlot(d, h, currMin)}
-                                                style={style}
-                                            />
-                                        );
-                                    })}
-                                </div>
-                            ))
-                        ))}
-                    </div>
+                                            const existingEvent = state.schedule.find(s => {
+                                                if (editClassId && s.classId === editClassId) return false;
+                                                if (s.day !== d) return false;
+                                                const [sH, sM] = s.startTime.split(':').map(Number);
+                                                const [eH, eM] = s.endTime.split(':').map(Number);
+                                                const startVal = sH * 60 + sM;
+                                                const endVal = eH * 60 + eM;
+                                                const currVal = h * 60 + currMin;
+                                                return currVal >= startVal && currVal < endVal;
+                                            });
 
-                    <div style={{ display: 'flex', gap: '12px', marginTop: '24px', paddingBottom: '40px' }}>
-                        <button onClick={() => setStep(1)} className="btn btn-secondary" style={{ flex: 1 }}>Back</button>
-                        <button onClick={() => setSelectedSlots(new Set())} className="btn btn-secondary" style={{ flex: 1, color: 'var(--color-error)', borderColor: 'var(--color-error)' }} disabled={selectedSlots.size === 0}>
-                            Clear
-                        </button>
-                        <button onClick={handleFinish} className="btn btn-primary" style={{ flex: 2 }}>
-                            {editClassId ? 'Save' : 'Finish'}
-                        </button>
-                    </div>
-                </>
+                                            let style: React.CSSProperties = {
+                                                height: '24px', // Taller touch target
+                                                background: 'white',
+                                                cursor: (existingEvent || isSleep) ? 'not-allowed' : 'pointer',
+                                                opacity: existingEvent ? 0.5 : 1
+                                            };
+
+                                            if (isSleep) {
+                                                style.background = '#F3E8FF';
+                                            } else if (existingEvent) {
+                                                const assoc = state.classes.find(c => c.name === existingEvent.label || existingEvent.label?.includes(c.name));
+                                                let bg = assoc ? assoc.color : '#ccc';
+                                                style.background = bg + '40';
+                                            } else if (isSelected) {
+                                                style.background = color;
+                                            }
+
+                                            return (
+                                                <div
+                                                    key={key}
+                                                    // Data attributes for touch-move detection
+                                                    data-day={d}
+                                                    data-hour={h}
+                                                    data-min={currMin}
+                                                    // Mouse Events
+                                                    onMouseDown={(e) => {
+                                                        if (existingEvent || isSleep) return;
+                                                        e.preventDefault(); // Prevent text select
+                                                        handleMouseDown(d, h, currMin);
+                                                    }}
+                                                    onMouseEnter={() => !existingEvent && !isSleep && handleMouseEnter(d, h, currMin)}
+                                                    // Touch Events
+                                                    onTouchStart={(e) => {
+                                                        if (existingEvent || isSleep) return;
+                                                        // Prevent default scroll if we are hitting a valid cell to allow drag
+                                                        // But we might want scroll if we tap? 
+                                                        // "touchAction: none" on the container handles blocking scroll.
+                                                        handleMouseDown(d, h, currMin);
+                                                    }}
+                                                    // Note: onTouchMove is handled by parent for performance/ correctness
+                                                    onClick={() => !existingEvent && !isSleep && toggleSlot(d, h, currMin)}
+                                                    style={style}
+                                                />
+                                            );
+                                        })}
+                                    </div>
+                                ))
+                            ))}
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '12px', marginTop: '24px', paddingBottom: '40px' }}>
+                            <button onClick={() => setStep(1)} className="btn btn-secondary" style={{ flex: 1 }}>Back</button>
+                            <button onClick={() => setSelectedSlots(new Set())} className="btn btn-secondary" style={{ flex: 1, color: 'var(--color-error)', borderColor: 'var(--color-error)' }} disabled={selectedSlots.size === 0}>
+                                Clear
+                            </button>
+                            <button onClick={handleFinish} className="btn btn-primary" style={{ flex: 2 }}>
+                                {editClassId ? 'Save' : 'Finish'}
+                            </button>
+                        </div>
+                    </>
+                )
             )}
 
             {/* Delete Modal */}

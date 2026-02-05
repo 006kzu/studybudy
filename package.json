@@ -1,9 +1,9 @@
 {
-  "name": "studybudy",
+  "name": "learnloop",
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -H 0.0.0.0",
     "build": "next build",
     "start": "next start",
     "mobile": "next build && npx cap sync",
@@ -18,9 +18,11 @@
     "@capacitor/core": "^8.0.1",
     "@capacitor/ios": "^8.0.1",
     "@capacitor/local-notifications": "^8.0.0",
+    "@capgo/native-purchases": "^8.0.21",
     "@supabase/auth-helpers-nextjs": "^0.15.0",
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.91.1",
+    "jsonwebtoken": "^9.0.3",
     "next": "16.1.4",
     "react": "19.2.3",
     "react-dom": "19.2.3"

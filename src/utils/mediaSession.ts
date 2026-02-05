@@ -33,7 +33,7 @@ export const startLockScreenSession = async (metadata: MediaSessionMetadata) => 
         navigator.mediaSession.metadata = new MediaMetadata({
             title: metadata.title,
             artist: metadata.artist,
-            album: metadata.album || 'StudyBudy',
+            album: metadata.album || 'Learn Loop',
             artwork: metadata.artwork || [
                 { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
                 { src: '/icon-512.png', sizes: '512x512', type: 'image/png' }

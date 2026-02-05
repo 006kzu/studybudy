@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.studdybuddies.app',
-  appName: 'StudyBudy',
+  appId: 'com.learnloop.learnloop',
+  appName: 'Learn Loop',
   webDir: 'out',
   server: {
     // Using local IP for physical device connectivity

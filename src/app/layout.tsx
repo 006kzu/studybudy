@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { AppProvider } from "@/context/AppContext";
+import GlobalRefreshWrapper from "@/components/GlobalRefreshWrapper";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -15,13 +16,12 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "Study Budy",
-  description: "Gamified Study Tracker",
+  title: "Learn Loop",
+  description: "Gamified productivity app for students",
   manifest: "/manifest.json",
-  appleWebApp: {
-    capable: true,
-    statusBarStyle: "black-translucent",
-    title: "Study Budy",
+  icons: {
+    icon: "/favicon.ico",
+    apple: "/icons/icon-192.png",
   },
 };
 
@@ -32,9 +32,15 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0" />
+        <title>Learn Loop</title>
+      </head>
       <body className={inter.className}>
         <AppProvider>
-          {children}
+          <GlobalRefreshWrapper>
+            {children}
+          </GlobalRefreshWrapper>
         </AppProvider>
       </body>
     </html>

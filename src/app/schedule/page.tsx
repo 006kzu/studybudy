@@ -94,6 +94,13 @@ export default function SchedulePage() {
     const [isRecurring, setIsRecurring] = useState(true);
     const [blockColor, setBlockColor] = useState('#666666');
     const [editingEventId, setEditingEventId] = useState<string | null>(null);
+    const [eventType, setEventType] = useState<'block' | 'study_manual'>('block');
+    const [selectedClassId, setSelectedClassId] = useState<string>('');
+
+    // Drag-and-Drop Move State
+    const [movingEventId, setMovingEventId] = useState<string | null>(null);
+    const [moveGhost, setMoveGhost] = useState<{ day: string, startTime: string } | null>(null);
+    const longPressTimer = useRef<NodeJS.Timeout | null>(null);
 
     // Sleep Helper
     const inputRef = useRef<HTMLInputElement>(null);
@@ -194,6 +201,7 @@ export default function SchedulePage() {
         { name: '⚖️ Balanced', type: 'balanced' },
         { name: '🌅 Early Bird', type: 'early' },
         { name: '🦉 Night Owl', type: 'night' },
+        { name: '🚫 No Evenings', type: 'no_evenings' },
         { name: '🏖️ Weekend Warrior', type: 'weekend' },
         { name: '🤓 The Grinder', type: 'grinder' },
     ];
@@ -204,53 +212,90 @@ export default function SchedulePage() {
         autoFillIndex.current += 1;
 
         // 1. Clear existing study sessions (Smart Re-roll)
+        // clearStudySchedule only deletes type='study'. 'study_manual' is preserved.
         await clearStudySchedule();
 
         // 2. Generate New Schedule
         const newItems: ScheduleItem[] = [];
 
         // Helper to check collision with ANY existing item (class, sleep, or newly added study)
+        // AND enforce 30 min buffer
         const isOccupied = (day: string, h: number, m: number) => {
-            // Check against existing state.schedule (classes/blocks)
+            const checkVal = h * 60 + m;
+            const BUFFER_MINS = 30;
+
+            const checkRangeStart = checkVal - BUFFER_MINS; // e.g. checking 10:00 (600), overlap if event ends > 570
+            const checkRangeEnd = checkVal + 60 + BUFFER_MINS; // checking 1 hr block (600-660), overlap if event starts < 690
+
+            // Helper: do intervals [startA, endA] and [startB, endB] overlap?
+            // Overlap if startA < endB && startB < endA
+            const hasOverlap = (sA: number, eA: number, sB: number, eB: number) => {
+                return sA < eB && sB < eA;
+            };
+
+            // 1. Check classes/blocks (existing state)
             const collision = state.schedule.some(s => {
                 if (s.day !== day) return false;
+
+                // IGNORE other generated study items if we were re-running (but we cleared them)
+                // We MUST respect study_manual
+                if (s.type === 'study') return false; // Should be gone, but just in case
+
                 const [sH, sM] = s.startTime.split(':').map(Number);
                 const [eH, eM] = s.endTime.split(':').map(Number);
                 const sVal = sH * 60 + sM;
                 const eVal = eH * 60 + eM;
-                const cVal = h * 60 + m;
-                return cVal >= sVal && cVal < eVal;
-            }) || isSleepTime(h, m);
+
+                // Check strict time collision + buffer
+                // We are trying to place a block from checkVal to checkVal + 60
+                // So we need clear space in [checkVal - 30, checkVal + 60 + 30]?
+                // Actually, simply: distance between (checkVal+60) and sVal must be >= 30
+                // AND distance between eVal and checkVal must be >= 30.
+
+                // Effective blocked range of existing event is [sVal - 30, eVal + 30]
+                return hasOverlap(checkVal, checkVal + 60, sVal - BUFFER_MINS, eVal + BUFFER_MINS);
+            });
 
             if (collision) return true;
 
-            // Check against newly added items in this batch
+            // 2. Check Sleep (No buffer needed for sleep? Maybe user wants to wake up and study immediately? 
+            // Let's enforce buffer for sleep too to be safe/relaxed)
+            // But isSleepTime takes point (h,m). We need range check.
+            // Simple check: check start, end, and middle points?
+            // Let's iterate hours in range? No, efficient way:
+            // If any minute in the candidate block is a sleep minute.
+            // Simplified: Check start time and end time against sleep? 
+            // Better: loop through the candidate hour in 15m steps?
+            for (let cm = 0; cm < 60; cm += 15) {
+                if (isSleepTime(Math.floor((checkVal + cm) / 60), (checkVal + cm) % 60)) return true;
+            }
+
+            // 3. Check against newly added items in this batch
             return newItems.some(s => {
                 if (s.day !== day) return false;
                 const [sH, sM] = s.startTime.split(':').map(Number);
                 const [eH, eM] = s.endTime.split(':').map(Number);
                 const sVal = sH * 60 + sM;
                 const eVal = eH * 60 + eM;
-                const cVal = h * 60 + m;
-                return cVal >= sVal && cVal < eVal;
+
+                return hasOverlap(checkVal, checkVal + 60, sVal - BUFFER_MINS, eVal + BUFFER_MINS);
             });
         };
 
-        const tryFillBlock = (cls: any, day: string, startH: number, endH: number, minutesNeeded: number) => {
+        const tryFillBlock = (cls: any, day: string, preferredHours: number[], minutesNeeded: number) => {
             if (minutesNeeded <= 0) return 0;
             let filled = 0;
 
-            // Try to find 1 hour blocks (60m)
-            for (let h = startH; h < endH; h++) {
+            // Try preferred hours first
+            for (let h of preferredHours) {
                 if (filled >= minutesNeeded) break;
 
-                // Check full hour availability (0,15,30,45)
-                let hourFree = true;
-                for (let m of [0, 15, 30, 45]) {
-                    if (isOccupied(day, h, m)) hourFree = false;
-                }
+                // Check full hour availability (0,15,30,45) - actually we place on hour boundaries usually
+                // User said "pick a study time" - usually implies hourly blocks.
+                // Let's look for slots on the hour :00.
+                const m = 0;
 
-                if (hourFree) {
+                if (!isOccupied(day, h, m)) {
                     // Create Study Item
                     const dayIndex = DAYS.indexOf(day);
 
@@ -267,11 +312,21 @@ export default function SchedulePage() {
                     });
 
                     filled += 60;
-                    if (currentMode.type === 'balanced') h++; // Buffer if balanced
+                    // If balanced, maybe skip next hour? Loop order handles it.
                 }
             }
             return filled;
         };
+
+        // Define Priority Arrays
+        // standard: > 5pm (17:00 - 23:00) then 8am-5pm
+        // standard: > 5pm (17:00 - 23:00) then 8am-5pm
+        const hoursPost5pm = [17, 18, 19, 20, 21, 22];
+        const hoursDay = [12, 13, 14, 15, 16]; // Afternoon
+        const hoursEarly = [5, 6, 7, 8, 9, 10, 11]; // Aggressive Morning Focus
+
+        // No Evenings: 9am - 5pm prioritized.
+        const hoursNoEvenings = [9, 10, 11, 12, 13, 14, 15, 16];
 
         // Iterate Classes
         const activeClasses = state.classes.filter(c => !c.isArchived);
@@ -279,45 +334,74 @@ export default function SchedulePage() {
         for (const cls of activeClasses) {
             let minutesNeeded = cls.weeklyGoalMinutes;
 
-            // Strategy Implementations
-            if (currentMode.type === 'balanced') {
-                const workDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].sort(() => Math.random() - 0.5);
-                for (const day of workDays) {
-                    minutesNeeded -= tryFillBlock(cls, day, 9, 17, minutesNeeded);
-                }
+            // DEDUCT MANUAL STUDY TIME
+            // Find all study_manual items for this class
+            const existingManual = state.schedule.filter(s => s.type === 'study_manual' && s.classId === cls.id);
+            let manualMinutes = 0;
+            existingManual.forEach(s => {
+                const [sH, sM] = s.startTime.split(':').map(Number);
+                const [eH, eM] = s.endTime.split(':').map(Number);
+                const sVal = sH * 60 + sM;
+                const eVal = eH * 60 + eM;
+
+                // Handle crossing midnight? Assuming study sessions don't wrap midnight for now or eH > sH
+                // If eVal < sVal (e.g. 23:00 to 01:00), treat as +24h?
+                // For now assuming simple same-day blocks or correct 24h format logic if simplified
+                let duration = eVal - sVal;
+                if (duration < 0) duration += 24 * 60; // Wrap around
+
+                manualMinutes += duration;
+            });
+
+            minutesNeeded = Math.max(0, minutesNeeded - manualMinutes);
+
+            // Determine Hours Strategy
+            let primaryHours: number[] = [];
+            let secondaryHours: number[] = [];
+            let daysToUse = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']; // Default weekdays
+
+            if (currentMode.type === 'no_evenings') {
+                primaryHours = hoursNoEvenings; // 9-5
+                secondaryHours = hoursEarly; // Fallback to early, but avoid evening
+            } else if (currentMode.type === 'early') {
+                daysToUse.sort(() => Math.random() - 0.5);
+                // STRICTLY Morning first
+                primaryHours = hoursEarly;
+                // Then afternoon/evening if needed
+                secondaryHours = [...hoursDay, ...hoursPost5pm];
+            } else if (currentMode.type === 'night') {
+                daysToUse.sort(() => Math.random() - 0.5);
+                primaryHours = [20, 21, 22, 23, 19, 18];
+                secondaryHours = hoursDay;
+            } else if (currentMode.type === 'weekend') {
+                daysToUse = ['Sat', 'Sun'];
+                primaryHours = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
+            } else {
+                // Balanced / Default / Grinder
+                // Prioritize > 5pm
+                primaryHours = hoursPost5pm;
+                secondaryHours = hoursDay;
+                daysToUse.sort(() => Math.random() - 0.5);
             }
-            else if (currentMode.type === 'early') {
-                const workDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].sort(() => Math.random() - 0.5);
-                for (const day of workDays) {
-                    minutesNeeded -= tryFillBlock(cls, day, 6, 9, minutesNeeded);
-                }
+
+            // Execute Fill
+            // Pass 1: Primary Hours on Target Days
+            for (const day of daysToUse) {
+                minutesNeeded -= tryFillBlock(cls, day, primaryHours, minutesNeeded);
             }
-            else if (currentMode.type === 'night') {
-                const workDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].sort(() => Math.random() - 0.5);
-                for (const day of workDays) {
-                    minutesNeeded -= tryFillBlock(cls, day, 20, 24, minutesNeeded);
-                }
-            }
-            else if (currentMode.type === 'weekend') {
-                const weekends = ['Sat', 'Sun'].sort(() => Math.random() - 0.5);
-                for (const day of weekends) {
-                    minutesNeeded -= tryFillBlock(cls, day, 10, 20, minutesNeeded);
-                }
-            }
-            else if (currentMode.type === 'grinder') {
-                const day = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'][Math.floor(Math.random() * 5)];
-                minutesNeeded -= tryFillBlock(cls, day, 8, 22, minutesNeeded);
-                if (minutesNeeded > 0) {
-                    const day2 = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].filter(d => d !== day)[Math.floor(Math.random() * 4)];
-                    minutesNeeded -= tryFillBlock(cls, day2, 8, 22, minutesNeeded);
+
+            // Pass 2: Secondary Hours on Target Days (if still needed)
+            if (minutesNeeded > 0) {
+                for (const day of daysToUse) {
+                    minutesNeeded -= tryFillBlock(cls, day, secondaryHours, minutesNeeded);
                 }
             }
 
-            // Fallback
-            if (minutesNeeded > 0) {
-                const allDays = [...DAYS].sort(() => Math.random() - 0.5);
-                for (const day of allDays) {
-                    minutesNeeded -= tryFillBlock(cls, day, 8, 22, minutesNeeded);
+            // Pass 3: Weekends fallback (if not weekend mode)
+            if (minutesNeeded > 0 && currentMode.type !== 'weekend') {
+                const weekend = ['Sat', 'Sun'];
+                for (const day of weekend) {
+                    minutesNeeded -= tryFillBlock(cls, day, [...primaryHours, ...secondaryHours], minutesNeeded);
                 }
             }
         }
@@ -355,17 +439,29 @@ export default function SchedulePage() {
             setBlockName('');
             setIsRecurring(true);
             setBlockColor('#666666');
+            setEventType('block');
+            setSelectedClassId('');
             setEditingEventId(null);
             setShowBlockModal(true);
         }
     };
 
     const handleEventClick = (event: ScheduleItem) => {
-        if (event.type === 'block') {
+        if (event.type === 'block' || event.type === 'study' || event.type === 'study_manual') {
             setEditingEventId(event.id);
             setBlockName(event.label || '');
             setIsRecurring(event.isRecurring !== false);
             setBlockColor(event.color || '#666666');
+
+            // Map type
+            if (event.type === 'study' || event.type === 'study_manual') {
+                setEventType('study_manual');
+                setSelectedClassId(event.classId || '');
+            } else {
+                setEventType('block');
+                setSelectedClassId('');
+            }
+
             setShowBlockModal(true);
         }
     };
@@ -379,17 +475,35 @@ export default function SchedulePage() {
     };
 
     const saveBlock = () => {
-        if (!blockName) return;
+        // Validation
+        if (eventType === 'block' && !blockName) return;
+        if (eventType === 'study_manual' && !selectedClassId) return;
+
+        let finalLabel = blockName;
+        let finalColor = blockColor;
+        let finalClassId: string | undefined = undefined;
+
+        if (eventType === 'study_manual') {
+            const cls = state.classes.find(c => c.id === selectedClassId);
+            if (cls) {
+                finalLabel = `Study ${cls.name}`;
+                finalColor = cls.color;
+                finalClassId = cls.id;
+            }
+        }
 
         if (editingEventId) {
             const original = state.schedule.find(s => s.id === editingEventId);
             if (original) {
-                const updated = {
+                const updated: ScheduleItem = {
                     ...original,
-                    label: blockName,
+                    label: finalLabel,
+                    type: eventType === 'study_manual' ? 'study_manual' : 'block',
+                    classId: finalClassId,
                     isRecurring: isRecurring,
-                    color: blockColor,
-                    specificDate: !isRecurring ? (original.specificDate || original.startDate || formatISO(new Date())) : undefined
+                    color: finalColor,
+                    specificDate: !isRecurring ? (original.specificDate || original.startDate || formatISO(new Date())) : undefined,
+                    // Remove manual flag if standard block? No, type handles it.
                 };
                 updateScheduleItem(updated);
             }
@@ -422,12 +536,13 @@ export default function SchedulePage() {
             day: start.day as any,
             startTime: start.time.split(':').map(t => t.toString().padStart(2, '0')).join(':'),
             endTime: `${eH}:${eM.toString().padStart(2, '0')}`,
-            type: 'block',
-            label: blockName,
+            type: eventType === 'study_manual' ? 'study_manual' : 'block',
+            label: finalLabel,
+            classId: finalClassId,
             isRecurring: isRecurring,
             specificDate: !isRecurring ? selectedDateISO : undefined,
             startDate: isRecurring ? selectedDateISO : undefined,
-            color: blockColor
+            color: finalColor
         };
 
         addScheduleItem(newItem);
@@ -435,15 +550,69 @@ export default function SchedulePage() {
         setDragSelection([]);
         setBlockName('');
         setIsRecurring(true);
+        setEventType('block');
+        setSelectedClassId('');
     };
 
     useEffect(() => {
         const upHandler = () => {
             if (isDragging) setIsDragging(false);
+
+            // Clear timer on global up
+            if (longPressTimer.current) {
+                clearTimeout(longPressTimer.current);
+                longPressTimer.current = null;
+            }
+
+            // Drop Logic
+            if (movingEventId && moveGhost) {
+                const event = state.schedule.find(s => s.id === movingEventId);
+                if (event) {
+                    const [sH, sM] = event.startTime.split(':').map(Number);
+                    const [eH, eM] = event.endTime.split(':').map(Number);
+                    const durationMin = (eH * 60 + eM) - (sH * 60 + sM);
+
+                    const [newSH, newSM] = moveGhost.startTime.split(':').map(Number);
+                    let newEM = newSM + durationMin;
+                    let newEH = newSH + Math.floor(newEM / 60);
+                    newEM = newEM % 60;
+
+                    const updated = {
+                        ...event,
+                        day: moveGhost.day as any,
+                        startTime: moveGhost.startTime,
+                        endTime: `${newEH}:${newEM.toString().padStart(2, '0')}`,
+                    };
+                    updateScheduleItem(updated);
+                }
+            }
+            // Always reset move state on up
+            if (movingEventId) {
+                setMovingEventId(null);
+                setMoveGhost(null);
+            }
         };
         window.addEventListener('mouseup', upHandler);
-        return () => window.removeEventListener('mouseup', upHandler);
-    }, [isDragging]);
+        window.addEventListener('touchend', upHandler);
+        return () => {
+            window.removeEventListener('mouseup', upHandler);
+            window.removeEventListener('touchend', upHandler);
+        };
+    }, [isDragging, movingEventId, moveGhost, state.schedule]);
+
+    const handleEventPointerDown = (eventId: string) => {
+        longPressTimer.current = setTimeout(() => {
+            setMovingEventId(eventId);
+            if (navigator && navigator.vibrate) navigator.vibrate(50);
+        }, 500);
+    };
+
+    const handleEventPointerUp = () => {
+        if (longPressTimer.current) {
+            clearTimeout(longPressTimer.current);
+            longPressTimer.current = null;
+        }
+    };
 
     const hasStudyItems = state.schedule.some(s => s.type === 'study');
 
@@ -493,7 +662,7 @@ export default function SchedulePage() {
                     style={{ flex: 0.5, background: 'var(--color-primary)', color: 'white' }}
                     title={`Current Mode: ${autoFillMode || 'Balanced'}`}
                 >
-                    ✨
+                    <img src="/icons/icon_magic_wand.png" alt="Auto-Generate" style={{ width: '48px', height: '48px' }} />
                 </button>
 
                 {hasStudyItems && (
@@ -530,29 +699,53 @@ export default function SchedulePage() {
                     style={{
                         display: 'grid',
                         ...gridStyle,
-                        gap: '1px', // Use gap for grid lines
-                        background: '#999', // Darker grid lines (container background showing through gap)
-                        border: '1px solid #999',
+                        gap: '0px', // Use gap for grid lines
+                        background: 'transparent', // Darker grid lines (container background showing through gap)
+                        border: 'none',
                         minWidth: '100%'
                     }}
                     onTouchMove={(e) => {
-                        // Global Touch Move handler for the grid when in Add Mode
-                        if (!isAddMode) return;
-
+                        // Global Touch Move handler
                         const touch = e.touches[0];
                         const target = document.elementFromPoint(touch.clientX, touch.clientY);
+
+                        if (movingEventId) {
+                            if (target && target instanceof HTMLElement && target.dataset.day) {
+                                // Snap to 15m
+                                const h = target.dataset.hour;
+                                const m = target.dataset.min;
+                                if (h && m) {
+                                    setMoveGhost({
+                                        day: target.dataset.day,
+                                        startTime: `${h}:${m}`
+                                    });
+                                }
+                            }
+                            return;
+                        }
+
+                        if (!isAddMode) return;
+
                         if (target && target instanceof HTMLElement) {
                             const day = target.dataset.day;
                             const h = target.dataset.hour;
                             const m = target.dataset.min;
 
                             if (day && h && m) {
-                                // Delegate to standard logic
-                                // Need to check if we are allowed to drag here (sleep, existing event)
-                                // But handleMouseEnter handles the logic of "adding to drag selection if allowed"
                                 if (isDragging) {
                                     handleMouseEnter(day, parseInt(h), parseInt(m));
                                 }
+                            }
+                        }
+                    }}
+                    onMouseMove={(e) => {
+                        if (movingEventId) {
+                            const target = e.target as HTMLElement;
+                            if (target.dataset.day && target.dataset.hour) {
+                                setMoveGhost({
+                                    day: target.dataset.day,
+                                    startTime: `${target.dataset.hour}:${target.dataset.min}`
+                                });
                             }
                         }
                     }}
@@ -601,6 +794,7 @@ export default function SchedulePage() {
                                     zIndex: 20,
                                     background: 'white',
                                     borderRight: '1px solid #f0f0f0',
+                                    borderTop: idx === 0 ? '1px solid #e5e5e5' : '1px solid #fbfbfb',
                                     visibility: currMin === 0 ? 'visible' : 'hidden'
                                 }}>
                                     {currMin === 0 ? format12h(h) : ''}
@@ -611,13 +805,9 @@ export default function SchedulePage() {
                                     const isSelected = dragSelection.some(s => s.day === d && s.time === `${h}:${currMin}`);
                                     const isSleep = (state.sleepSettings?.enabled && isSleepTime(h, currMin));
 
-                                    // Find existing event
-                                    const event = state.schedule.find(s => {
-                                        if (s.day !== d) return false;
-
+                                    const event = state.schedule.find(s => s.id === movingEventId ? false : (s.day !== d ? false : (() => {
                                         // Default isRecurring to true if null/undefined
                                         const isRecurring = s.isRecurring !== false;
-
                                         if (isRecurring) {
                                             if (s.startDate && colDateStr < s.startDate) return false;
                                         } else {
@@ -629,7 +819,43 @@ export default function SchedulePage() {
                                         const endVal = eH * 60 + eM;
                                         const currVal = h * 60 + currMin;
                                         return currVal >= startVal && currVal < endVal;
-                                    });
+                                    })()));
+
+                                    // Ghost Logic
+                                    let isGhost = false;
+                                    let ghostEvent: ScheduleItem | undefined = undefined;
+                                    if (movingEventId && moveGhost && moveGhost.day === d) {
+                                        const original = state.schedule.find(s => s.id === movingEventId);
+                                        if (original) {
+                                            const [sH, sM] = original.startTime.split(':').map(Number);
+                                            const [eH, eM] = original.endTime.split(':').map(Number);
+                                            const duration = (eH * 60 + eM) - (sH * 60 + sM);
+
+                                            const [ghH, ghM] = moveGhost.startTime.split(':').map(Number);
+                                            const ghostStartVal = ghH * 60 + ghM;
+                                            const ghostEndVal = ghostStartVal + duration;
+                                            const currVal = h * 60 + currMin;
+
+                                            if (currVal >= ghostStartVal && currVal < ghostEndVal) {
+                                                isGhost = true;
+                                                ghostEvent = original;
+                                            }
+                                        }
+                                    }
+
+                                    // Display Logic
+                                    // If isGhost, show ghost style (dimmed original color?)
+                                    // If event (and not moving), show event
+                                    // If movingEvent is this cell (original position), show dimmed/hidden?
+                                    // Actually, we filtered out movingEventId from 'event' search above to hide original.
+                                    // But we should probably show original dimmed until dropped?
+                                    // The filter above `s.id === movingEventId ? false` hides it. 
+                                    // So we only see Ghost.
+                                    // Wait, if we hide original, we lose the 'source' reference visuals. 
+                                    // Better to show original as semi-transparent, and Ghost as full?
+                                    // Let's hide original for 'drag' feel (it moves with you).
+
+                                    const displayEvent = isGhost ? ghostEvent : event;
 
                                     let bgColor = '#fff';
                                     let textColor = 'transparent';
@@ -637,40 +863,46 @@ export default function SchedulePage() {
                                     let isStart = false;
                                     let bgStyle: any = { background: '#fff' };
                                     let borderStyle = {
-                                        borderBottom: idx === 3 ? '1px solid #ddd' : '1px solid #f9f9f9',
+                                        borderTop: idx === 0 ? '1px solid #e5e5e5' : '1px solid #fbfbfb',
                                         borderRight: '1px solid #f9f9f9'
                                     };
 
                                     if (isSleep) {
-                                        bgStyle = {
-                                            background: '#F3E8FF'
-                                        };
-                                        // Remove borders for seamless look
-                                        borderStyle = {
-                                            borderBottom: 'none',
-                                            borderRight: 'none'
-                                        };
+                                        bgStyle = { background: '#F3E8FF' };
+                                        borderStyle = { borderTop: 'none', borderRight: 'none' };
                                     } else if (isSelected) {
                                         bgStyle = { background: '#ddd' };
-                                    } else if (event) {
+                                    } else if (displayEvent) {
                                         textColor = 'white';
-                                        const assoc = state.classes.find(c => c.name === event.label || event.label?.endsWith(c.name));
+                                        const assoc = state.classes.find(c => c.id === displayEvent.classId || c.name === displayEvent.label || displayEvent.label?.endsWith(c.name));
 
-                                        if (event.type === 'block') {
-                                            bgStyle = { background: event.color || '#666' };
+                                        if (displayEvent.type === 'block') {
+                                            bgStyle = { background: displayEvent.color || '#666' };
                                         } else if (assoc) {
                                             bgStyle = { background: assoc.color };
-                                        } else if (event.type === 'study') {
+                                        } else if (displayEvent.type === 'study') {
                                             bgStyle = { background: 'var(--color-primary)' };
                                         } else {
                                             bgStyle = { background: 'var(--color-secondary)' };
                                         }
 
-                                        const [sH, sM] = event.startTime.split(':').map(Number);
+                                        if (isGhost) {
+                                            bgStyle.opacity = 0.6;
+                                            bgStyle.boxShadow = '0 4px 8px rgba(0,0,0,0.2)';
+                                            bgStyle.zIndex = 50;
+                                            bgStyle.transform = 'scale(1.02)';
+                                        }
+
+                                        // Determine start time for label
+                                        // For Ghost: match moveGhost.startTime
+                                        // For Event: match event.startTime
+                                        const startTimeToCheck = isGhost && moveGhost ? moveGhost.startTime : displayEvent.startTime;
+                                        const [sH, sM] = startTimeToCheck.split(':').map(Number);
+
                                         if (sH === h && sM === currMin) {
-                                            label = event.label || '';
+                                            label = displayEvent.label || '';
                                             isStart = true;
-                                            if (!event.isRecurring && event.isRecurring !== undefined) label += ' (1x)';
+                                            if (!displayEvent.isRecurring && displayEvent.isRecurring !== undefined) label += ' (1x)';
                                         }
                                     }
 
@@ -683,25 +915,26 @@ export default function SchedulePage() {
                                             data-min={currMin}
 
                                             // Handlers
-                                            onMouseDown={() => {
-                                                if (event) handleEventClick(event);
-                                                else if (isAddMode) handleMouseDown(d, h, currMin);
-                                            }}
-                                            onMouseEnter={() => !event && isAddMode && handleMouseEnter(d, h, currMin)}
-
-                                            // Touch Start (Only if Add Mode)
-                                            onTouchStart={(e) => {
+                                            onPointerDown={(e) => {
+                                                // If clicking an existing event, try to move
                                                 if (event) {
-                                                    // Allow clicking events even in non-add mode? Yes, to edit them.
-                                                    handleEventClick(event);
-                                                    return;
+                                                    handleEventPointerDown(event.id);
                                                 }
-
-                                                if (isAddMode) {
-                                                    // e.preventDefault(); // handled by touchAction: none container
+                                                // Add mode logic
+                                                if (!event && !isGhost && isAddMode) {
                                                     handleMouseDown(d, h, currMin);
                                                 }
                                             }}
+                                            onPointerUp={(e) => {
+                                                handleEventPointerUp(); // Clear long press
+                                                // If we were adding, finish
+                                                // If we were moving, global up handles it
+                                                // If clicking event to edit:
+                                                if (event && !movingEventId) { // Only edit if not moving
+                                                    handleEventClick(event);
+                                                }
+                                            }}
+                                            onMouseEnter={() => !displayEvent && isAddMode && handleMouseEnter(d, h, currMin)}
 
                                             style={{
                                                 height: '18px',
@@ -710,11 +943,13 @@ export default function SchedulePage() {
                                                 padding: '2px 4px',
                                                 color: textColor,
                                                 ...borderStyle,
-                                                opacity: (event?.type === 'study' || event?.type === 'block') ? 0.9 : 1,
+                                                opacity: (isGhost) ? 0.7 : ((displayEvent?.type === 'study' || displayEvent?.type === 'block') ? 0.9 : 1),
                                                 overflow: 'hidden',
                                                 whiteSpace: 'nowrap',
                                                 textOverflow: 'ellipsis',
-                                                cursor: isSleep ? 'not-allowed' : (isAddMode ? 'crosshair' : 'default')
+                                                cursor: isSleep ? 'not-allowed' : (isAddMode || event ? 'pointer' : 'default'),
+                                                userSelect: 'none',
+                                                touchAction: movingEventId ? 'none' : 'auto'
                                             }}
                                         >
                                             {isStart && label}
@@ -756,43 +991,99 @@ export default function SchedulePage() {
                 }
             >
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+
+                    {/* Event Type Selector */}
                     <div>
-                        <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>Event Name</label>
-                        <input
-                            ref={inputRef}
-                            className="input"
-                            value={blockName}
-                            onChange={e => setBlockName(e.target.value)}
-                            placeholder="e.g. Work, Gym, Doctor"
-                            autoFocus
-                        />
-                    </div>
-                    <div>
-                        <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>Color</label>
-                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                            {COLORS.map(c => (
-                                <div
-                                    key={c}
-                                    onPointerDown={(e) => {
-                                        e.preventDefault(); // Prevent default focus behavior
-                                        setBlockColor(c);
-                                        // Optional: Blur input to dismiss keyboard if desired, or keep it. 
-                                        // User complaint was they "have to" click off. 
-                                        // Now the color will set immediately regardless.
-                                        (document.activeElement as HTMLElement)?.blur();
-                                    }}
-                                    style={{
-                                        width: '30px',
-                                        height: '30px',
-                                        borderRadius: '50%',
-                                        backgroundColor: c,
-                                        cursor: 'pointer',
-                                        border: blockColor === c ? '3px solid #333' : '1px solid #ddd'
-                                    }}
-                                />
-                            ))}
+                        <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>Event Type</label>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                            <button
+                                onClick={() => setEventType('block')}
+                                className="btn"
+                                style={{
+                                    flex: 1,
+                                    background: eventType === 'block' ? 'var(--color-primary)' : '#f0f0f0',
+                                    color: eventType === 'block' ? 'white' : '#333',
+                                    border: 'none'
+                                }}
+                            >
+                                General Info
+                            </button>
+                            <button
+                                onClick={() => setEventType('study_manual')}
+                                className="btn"
+                                style={{
+                                    flex: 1,
+                                    background: eventType === 'study_manual' ? 'var(--color-primary)' : '#f0f0f0',
+                                    color: eventType === 'study_manual' ? 'white' : '#333',
+                                    border: 'none'
+                                }}
+                            >
+                                Study Session
+                            </button>
                         </div>
                     </div>
+
+                    {eventType === 'block' ? (
+                        <>
+                            <div>
+                                <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>Event Name</label>
+                                <input
+                                    ref={inputRef}
+                                    className="input"
+                                    value={blockName}
+                                    onChange={e => setBlockName(e.target.value)}
+                                    placeholder="e.g. Work, Gym, Doctor"
+                                    autoFocus
+                                />
+                            </div>
+                            <div>
+                                <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>Color</label>
+                                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                    {COLORS.map(c => (
+                                        <div
+                                            key={c}
+                                            onPointerDown={(e) => {
+                                                e.preventDefault();
+                                                setBlockColor(c);
+                                                (document.activeElement as HTMLElement)?.blur();
+                                            }}
+                                            style={{
+                                                width: '30px',
+                                                height: '30px',
+                                                borderRadius: '50%',
+                                                backgroundColor: c,
+                                                cursor: 'pointer',
+                                                border: blockColor === c ? '3px solid #333' : '1px solid #ddd'
+                                            }}
+                                        />
+                                    ))}
+                                </div>
+                            </div>
+                        </>
+                    ) : (
+                        <div>
+                            <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>Select Class</label>
+                            <select
+                                className="input"
+                                value={selectedClassId}
+                                onChange={e => setSelectedClassId(e.target.value)}
+                                style={{ width: '100%' }}
+                            >
+                                <option value="" disabled>-- Choose a Class --</option>
+                                {state.classes.map(c => (
+                                    !c.isArchived && (
+                                        <option key={c.id} value={c.id}>
+                                            {c.name}
+                                        </option>
+                                    )
+                                ))}
+                            </select>
+                            <p style={{ fontSize: '0.8rem', color: '#666', marginTop: '8px' }}>
+                                This study session will be locked and respected by the auto-scheduler.
+                            </p>
+                        </div>
+                    )}
+
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <input
                             type="checkbox"

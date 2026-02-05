@@ -32,9 +32,32 @@ export class AdMobService {
         }
     }
 
+    private static mockBannerEl: HTMLElement | null = null;
+
     static async showBanner() {
         if (!Capacitor.isNativePlatform()) {
             console.log('[AdMob] showBanner (Web Mock)');
+            if (!this.mockBannerEl) {
+                this.mockBannerEl = document.createElement('div');
+                this.mockBannerEl.innerText = 'TEST AD BANNER (Web Mock)';
+                Object.assign(this.mockBannerEl.style, {
+                    position: 'fixed',
+                    bottom: '0',
+                    left: '0',
+                    width: '100%',
+                    height: '50px',
+                    backgroundColor: '#333',
+                    color: '#fff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: '9999',
+                    fontSize: '14px',
+                    fontWeight: 'bold',
+                    boxShadow: '0 -2px 10px rgba(0,0,0,0.2)'
+                });
+                document.body.appendChild(this.mockBannerEl);
+            }
             return;
         }
 
@@ -53,7 +76,13 @@ export class AdMobService {
     }
 
     static async hideBanner() {
-        if (!Capacitor.isNativePlatform()) return;
+        if (!Capacitor.isNativePlatform()) {
+            if (this.mockBannerEl) {
+                this.mockBannerEl.remove();
+                this.mockBannerEl = null;
+            }
+            return;
+        }
         try {
             await AdMob.hideBanner();
         } catch (e) {
@@ -62,7 +91,11 @@ export class AdMobService {
     }
 
     static async removeBanner() {
-        if (!Capacitor.isNativePlatform()) return;
+        // Reuse hide logic for web
+        if (!Capacitor.isNativePlatform()) {
+            this.hideBanner();
+            return;
+        }
         try {
             await AdMob.removeBanner();
         } catch (e) {
