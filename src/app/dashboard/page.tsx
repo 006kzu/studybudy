@@ -40,7 +40,7 @@ function DashboardContent() {
     };
 
     // Gift Receipt State
-    const [giftData, setGiftData] = useState<{ coins: number, gameMinutes: number, senderName: string } | null>(null);
+    const [giftData, setGiftData] = useState<{ coins: number, gameMinutes: number, senderName: string, giftCredits?: { legendary: number, epic: number, rare: number } } | null>(null);
 
     // Check for earnings/gifts on mount
     useEffect(() => {
@@ -68,20 +68,26 @@ function DashboardContent() {
     }, [searchParams, router, user, isLoading]);
 
     // Separate Effect for Claiming Gifts to avoid missing dependencies in the complex one above
-    const { claimPendingGifts } = useApp();
+    const { claimPendingGifts, extendBreak } = useApp();
     useEffect(() => {
         let mounted = true;
         const claim = async () => {
             if (!user || isLoading) return;
             const gift = await claimPendingGifts();
-            if (mounted && gift && (gift.coins > 0 || gift.gameMinutes > 0)) {
+            const hasGiftCredits = gift?.giftCredits && (gift.giftCredits.legendary > 0 || gift.giftCredits.epic > 0 || gift.giftCredits.rare > 0);
+            if (mounted && gift && (gift.coins > 0 || gift.gameMinutes > 0 || hasGiftCredits)) {
                 setGiftData(gift);
-                // Play sound?
+                // Help the user: Apply Game Time immediately so it's not lost
+                if (gift.gameMinutes > 0) {
+                    console.log('[Dashboard] Applying gifted game time:', gift.gameMinutes);
+                    extendBreak(gift.gameMinutes);
+                }
+                // Play sound can go here
             }
         };
         claim();
         return () => { mounted = false; };
-    }, [user, isLoading, claimPendingGifts]);
+    }, [user, isLoading, claimPendingGifts, extendBreak]);
 
     // Auto-Retry Fetch for "Missing Classes" bug
     // If logged in, not loading, but no data? Try once more.
@@ -192,7 +198,7 @@ function DashboardContent() {
         <main className="container" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 16px)' }}>
             <header style={{ marginBottom: '24px' }}>
                 {/* Top Row: Title & Avatar */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                     <div style={{ paddingTop: '16px' }}>
                         <h1 className="text-h1" style={{ margin: 0, lineHeight: 1 }}>Dashboard</h1>
                         {user && (
@@ -206,6 +212,30 @@ function DashboardContent() {
                             </div>
                         )}
                     </div>
+
+
+
+                    {/* Game Time Bank in Header */}
+                    {(state.gameTimeBank ?? 0) >= 0 && (
+                        <Link href="/games" style={{ textDecoration: 'none' }}>
+                            <div className="animate-fade-in" style={{
+                                background: 'linear-gradient(135deg, #f43f5e 0%, #fb923c 100%)',
+                                color: 'white',
+                                padding: '6px 12px',
+                                borderRadius: '12px',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                alignItems: 'center',
+                                margin: '0 8px',
+                                boxShadow: '0 4px 6px rgba(139, 92, 246, 0.2)',
+                                flexShrink: 0,
+                                cursor: 'pointer'
+                            }} title="Go to Game Hub">
+                                <div style={{ fontSize: '0.65rem', opacity: 0.9, textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.5px' }}>Bank</div>
+                                <div style={{ fontWeight: 800, fontSize: '1.2rem', lineHeight: 1 }}>{state.gameTimeBank}m</div>
+                            </div>
+                        </Link>
+                    )}
 
                     <div style={{ marginRight: '0px' }}>
                         <WienerAvatar points={state.points} inventory={state.inventory} equippedAvatar={state.equippedAvatar} coinPosition="top" size="small" />
@@ -225,18 +255,22 @@ function DashboardContent() {
                         <img src="/icons/schedule.png" alt="Schedule" style={{ width: '64px', height: '64px', marginBottom: '-4px' }} />
                         Schedule
                     </Link>
+                    <Link href="/notes" style={{ fontSize: '0.7rem', color: 'var(--color-primary)', display: 'flex', flexDirection: 'column', alignItems: 'center', textDecoration: 'none' }}>
+                        <img src="/icons/icon_books.png" alt="Notes" style={{ width: '64px', height: '64px', marginBottom: '-4px' }} />
+                        Notes
+                    </Link>
                     <Link href="/shop" style={{ fontSize: '0.7rem', color: 'var(--color-primary)', display: 'flex', flexDirection: 'column', alignItems: 'center', textDecoration: 'none' }}>
                         <img src="/icons/shop.png" alt="Shop" style={{ width: '64px', height: '64px', marginBottom: '-4px' }} />
                         Shop
-                    </Link>
-                    <Link href="/stats" style={{ fontSize: '0.7rem', color: 'var(--color-primary)', display: 'flex', flexDirection: 'column', alignItems: 'center', textDecoration: 'none' }}>
-                        <img src="/icons/stats.png" alt="Stats" style={{ width: '64px', height: '64px', marginBottom: '-4px' }} />
-                        Stats
                     </Link>
                     <Link href="/leaderboard" style={{ fontSize: '0.7rem', color: 'var(--color-primary)', display: 'flex', flexDirection: 'column', alignItems: 'center', textDecoration: 'none' }}>
                         <img src="/icons/leaderboard.png" alt="Leaderboard" style={{ width: '64px', height: '64px', marginBottom: '-4px' }} />
                         Leaderboard
                     </Link>
+                    {/* Stats moved/removed to make space if needed, or keep as 5th item? User said "between Dashboard and Character" which usually means Top Row, but then "between Schedule and Shop" implies Grid. 
+                    Wait, the user said: "move the "My Notes" and its icon to between "Dashboard" and the user's character on the dashboard" 
+                    AH! "Between 'Dashboard' (Title) and 'User's Character' (Avatar)" -> This is the Header Row! 
+                    My previous plan was wrong. Re-reading request. */}
                 </div>
             </header>
 
@@ -434,30 +468,32 @@ function DashboardContent() {
             />
 
             {/* Earned Modal (Legacy/Winner) */}
-            {showEarnedModal && (
-                <div style={{
-                    position: 'fixed', top: '10%', left: '50%', transform: 'translateX(-50%)',
-                    zIndex: 2000, pointerEvents: 'none'
-                }}>
+            {
+                showEarnedModal && (
                     <div style={{
-                        background: 'white',
-                        padding: '16px 24px',
-                        borderRadius: 'var(--radius-full)',
-                        boxShadow: '0 10px 40px -10px rgba(0,0,0,0.2)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '12px',
-                        animation: 'fadeIn 0.3s ease-out',
-                        border: '1px solid var(--color-border)'
+                        position: 'fixed', top: '10%', left: '50%', transform: 'translateX(-50%)',
+                        zIndex: 2000, pointerEvents: 'none'
                     }}>
-                        <div style={{ fontSize: '1.5rem' }}>{isWinner ? '🏆' : '🌭'}</div>
-                        <div>
-                            <p style={{ fontWeight: 'bold', fontSize: '0.9rem' }}>{isWinner ? 'You Won!' : 'Good Job!'}</p>
-                            <p style={{ fontSize: '0.8rem', color: 'var(--color-primary)' }}>+{earnedAmount} Coins 💰</p>
+                        <div style={{
+                            background: 'white',
+                            padding: '16px 24px',
+                            borderRadius: 'var(--radius-full)',
+                            boxShadow: '0 10px 40px -10px rgba(0,0,0,0.2)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '12px',
+                            animation: 'fadeIn 0.3s ease-out',
+                            border: '1px solid var(--color-border)'
+                        }}>
+                            <div style={{ fontSize: '1.5rem' }}>{isWinner ? '🏆' : '🌭'}</div>
+                            <div>
+                                <p style={{ fontWeight: 'bold', fontSize: '0.9rem' }}>{isWinner ? 'You Won!' : 'Good Job!'}</p>
+                                <p style={{ fontSize: '0.8rem', color: 'var(--color-primary)' }}>+{earnedAmount} Coins 💰</p>
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
             {/* NEW Gift Received Modal */}
             <Modal
@@ -468,7 +504,7 @@ function DashboardContent() {
                 actions={
                     <>
                         <button className="btn btn-secondary" onClick={() => setGiftData(null)}>
-                            {giftData?.gameMinutes && giftData.gameMinutes > 0 ? 'Save for Later' : 'Awesome!'}
+                            Thanks!
                         </button>
                         {giftData?.gameMinutes && giftData.gameMinutes > 0 && (
                             <button
@@ -507,16 +543,48 @@ function DashboardContent() {
                                 <div style={{ fontSize: '0.8rem', textTransform: 'uppercase', fontWeight: 700, color: '#94a3b8' }}>Game Time</div>
                             </div>
                         ) : null}
+                        {giftData?.giftCredits && (giftData.giftCredits.legendary > 0 || giftData.giftCredits.epic > 0 || giftData.giftCredits.rare > 0) ? (
+                            <div style={{ textAlign: 'center' }}>
+                                <div style={{ fontSize: '2rem' }}>🎁</div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', margin: '8px 0' }}>
+                                    {giftData.giftCredits.legendary > 0 && (
+                                        <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#9d4edo' }}>
+                                            {giftData.giftCredits.legendary} Legendary Credit{giftData.giftCredits.legendary > 1 ? 's' : ''}
+                                        </div>
+                                    )}
+                                    {giftData.giftCredits.epic > 0 && (
+                                        <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#a855f7' }}>
+                                            {giftData.giftCredits.epic} Epic Credit{giftData.giftCredits.epic > 1 ? 's' : ''}
+                                        </div>
+                                    )}
+                                    {giftData.giftCredits.rare > 0 && (
+                                        <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#3b82f6' }}>
+                                            {giftData.giftCredits.rare} Rare Credit{giftData.giftCredits.rare > 1 ? 's' : ''}
+                                        </div>
+                                    )}
+                                </div>
+                                <Link href="/shop" className="btn btn-primary" style={{
+                                    textDecoration: 'none',
+                                    fontSize: '0.8rem',
+                                    marginTop: '8px',
+                                    padding: '8px 16px',
+                                    display: 'inline-block'
+                                }}>
+                                    Go to Shop
+                                </Link>
+                            </div>
+                        ) : null}
                     </div>
                 </div>
             </Modal>
+
             {/* Footer / Settings */}
             <div style={{ marginTop: '32px', textAlign: 'center', paddingBottom: '32px' }}>
                 <Link href="/settings" style={{ color: 'var(--color-text-secondary)', textDecoration: 'none', fontSize: '0.9rem', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
                     <img src="/icons/settings.png" alt="Settings" style={{ width: '36px', height: '36px' }} /> Settings
                 </Link>
             </div>
-        </main>
+        </main >
     );
 }
 

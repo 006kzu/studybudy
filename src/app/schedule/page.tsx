@@ -6,6 +6,7 @@ import { generateUUID } from '@/lib/uuid';
 import Modal from '@/components/Modal';
 import Toast from '@/components/Toast';
 import { useState, useEffect, useRef } from 'react';
+import { generateICS, downloadICS } from '@/lib/calendar';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const ALL_HOURS = Array.from({ length: 24 }, (_, i) => i);
@@ -24,6 +25,12 @@ export default function SchedulePage() {
 
     const [showClearModal, setShowClearModal] = useState(false);
     const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+    const handleExportCalendar = () => {
+        const icsContent = generateICS(state.schedule, state.classes);
+        downloadICS('StudyBudy_Schedule.ics', icsContent);
+        setToast({ message: 'Schedule Exported!', type: 'success' });
+    };
 
     // Responsive View State
     const [viewDays, setViewDays] = useState(7);
@@ -262,9 +269,6 @@ export default function SchedulePage() {
             // Let's enforce buffer for sleep too to be safe/relaxed)
             // But isSleepTime takes point (h,m). We need range check.
             // Simple check: check start, end, and middle points?
-            // Let's iterate hours in range? No, efficient way:
-            // If any minute in the candidate block is a sleep minute.
-            // Simplified: Check start time and end time against sleep? 
             // Better: loop through the candidate hour in 15m steps?
             for (let cm = 0; cm < 60; cm += 15) {
                 if (isSleepTime(Math.floor((checkVal + cm) / 60), (checkVal + cm) % 60)) return true;
@@ -629,9 +633,20 @@ export default function SchedulePage() {
 
     return (
         <main className="container" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 16px)' }} onMouseUp={() => isDragging && handleMouseUp()} onTouchEnd={() => isDragging && handleMouseUp()}>
+            {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+
             <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <h1 className="text-h1">Schedule</h1>
-                <Link href="/dashboard" className="btn btn-secondary">Done</Link>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                        onClick={handleExportCalendar}
+                        className="btn"
+                        style={{ padding: '8px 12px', fontSize: '0.9rem', background: '#333', color: 'white' }}
+                    >
+                        📤 Export
+                    </button>
+                    <Link href="/dashboard" className="btn btn-secondary">Done</Link>
+                </div>
             </header>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', marginBottom: '16px', fontWeight: 'bold' }}>
@@ -676,11 +691,13 @@ export default function SchedulePage() {
                 )}
             </div>
 
-            {isAddMode && (
-                <div style={{ textAlign: 'center', marginBottom: '12px', fontSize: '0.85rem', color: 'var(--color-primary)', background: '#e6fffa', padding: '8px', borderRadius: '8px' }}>
-                    👆 Tap & Drag on the calendar to create a new block.
-                </div>
-            )}
+            {
+                isAddMode && (
+                    <div style={{ textAlign: 'center', marginBottom: '12px', fontSize: '0.85rem', color: 'var(--color-primary)', background: '#e6fffa', padding: '8px', borderRadius: '8px' }}>
+                        👆 Tap & Drag on the calendar to create a new block.
+                    </div>
+                )
+            }
 
             <div
                 ref={containerRef}
@@ -1116,13 +1133,15 @@ export default function SchedulePage() {
             >
                 Are you sure you want to remove all auto-generated study blocks?
             </Modal>
-            {toast && (
-                <Toast
-                    message={toast.message}
-                    type={toast.type}
-                    onClose={() => setToast(null)}
-                />
-            )}
-        </main>
+            {
+                toast && (
+                    <Toast
+                        message={toast.message}
+                        type={toast.type}
+                        onClose={() => setToast(null)}
+                    />
+                )
+            }
+        </main >
     );
 }

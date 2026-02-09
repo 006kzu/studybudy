@@ -138,39 +138,23 @@ export default function LeaderboardPage() {
                     ←
                 </button>
                 <h1 style={{
-                    fontSize: '2.5rem',
-                    margin: 0,
+                    fontSize: '2rem',
+                    margin: '0 auto',
                     background: 'linear-gradient(135deg, #ffd700, #ff6b6b)',
-                    WebkitTextFillColor: 'transparent',
+                    color: 'white',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    gap: '12px'
+                    gap: '12px',
+                    borderRadius: '24px',
+                    padding: '12px 24px',
+                    width: 'fit-content',
+                    boxShadow: '0 4px 12px rgba(255, 107, 107, 0.3)'
                 }}>
                     <img src="/icons/leaderboard.png" alt="Leaderboard" style={{ width: '80px', height: '80px' }} />
                     Leaderboard
                 </h1>
-                <button
-                    onClick={() => fetchLeaderboard()}
-                    style={{
-                        position: 'absolute',
-                        right: '0',
-                        top: '8px',
-                        background: 'rgba(255,255,255,0.1)',
-                        border: '1px solid #333',
-                        color: '#fff',
-                        borderRadius: '50%',
-                        width: '40px',
-                        height: '40px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        cursor: 'pointer',
-                        fontSize: '1.2rem'
-                    }}
-                >
-                    🔄
-                </button>
+
                 <p style={{ color: '#888', marginTop: '8px' }}>Top 100 Players</p>
             </header>
 

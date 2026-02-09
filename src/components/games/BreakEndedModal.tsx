@@ -5,9 +5,11 @@ type BreakEndedModalProps = {
     onWatchAd: () => void;
     onExit: () => void;
     canWatchAd: boolean;
+    title?: string;
+    message?: string;
 };
 
-export const BreakEndedModal = ({ onWatchAd, onExit, canWatchAd }: BreakEndedModalProps) => {
+export const BreakEndedModal = ({ onWatchAd, onExit, canWatchAd, title, message }: BreakEndedModalProps) => {
     return (
         <div style={{
             position: 'absolute',
@@ -32,9 +34,9 @@ export const BreakEndedModal = ({ onWatchAd, onExit, canWatchAd }: BreakEndedMod
                 boxShadow: '0 10px 30px rgba(0,0,0,0.5)'
             }}>
                 <div style={{ fontSize: '4rem', marginBottom: '10px' }}>⏰</div>
-                <h2 style={{ fontSize: '1.8rem', color: '#fff', marginBottom: '10px' }}>Break Over!</h2>
+                <h2 style={{ fontSize: '1.8rem', color: '#fff', marginBottom: '10px' }}>{title || 'Break Over!'}</h2>
                 <p style={{ color: '#aaa', marginBottom: '20px', fontSize: '1rem', lineHeight: '1.5' }}>
-                    Time to get back to studying! You need to study more to earn more break time.
+                    {message || 'Time to get back to studying! You need to study more to earn more break time.'}
                 </p>
 
                 {canWatchAd ? (

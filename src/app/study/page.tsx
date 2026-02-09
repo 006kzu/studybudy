@@ -1,21 +1,16 @@
 'use client';
-
+// ... imports
+import { Suspense, useState, useRef, useEffect } from 'react';
+import React from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { generateUUID } from '@/lib/uuid';
-import {
-    initAudio,
-    startLockScreenSession,
-    updateLockScreenProgress,
-    clearLockScreenSession,
-    setLockScreenHandlers
-} from '@/utils/mediaSession';
-import { useRef, useEffect, useState } from 'react';
 import { AVATARS } from '@/constants/avatars';
-import { Suspense } from 'react';
+import Link from 'next/link';
 import Modal from '@/components/Modal';
 import FlappyBirdGame from '@/components/games/FlappyBirdGame';
+import StudyNotesModal from '@/components/StudyNotesModal';
 import ShareProgressModal from '@/components/ShareProgressModal';
+import { initAudio, startLockScreenSession, setLockScreenHandlers, clearLockScreenSession, updateLockScreenProgress } from '@/utils/mediaSession';
 
 function StudyPageContent() {
     const { state, recordSession, user, scheduleStudyNotification, cancelStudyNotification, startBreak, saveActiveSession, clearActiveSession, isLoading } = useApp();
@@ -74,7 +69,12 @@ function StudyPageContent() {
         return `${m} mins ${s} Seconds`;
     };
 
-    // Timer Logic
+    // ... inside component ...
+    const [showNotesModal, setShowNotesModal] = useState(false);
+    const [pendingAction, setPendingAction] = useState<'break' | 'finish' | null>(null);
+    const [sessionNote, setSessionNote] = useState<string | undefined>(undefined);
+
+    // ... existing timer logic ...
     useEffect(() => {
         let interval: NodeJS.Timeout;
         if (isActive && !finished && !isPlayingGame) { // Pause timer while playing game
@@ -84,7 +84,9 @@ function StudyPageContent() {
                     // Check for 25m interval (1500 seconds)
                     if (next > 0 && next % 1500 === 0) {
                         setIsActive(false); // Pause timer
-                        setShowBreakModal(true);
+                        // INTERCEPT: Show Notes Modal instead of Break Modal directly
+                        setPendingAction('break');
+                        setShowNotesModal(true);
                     }
                     return next;
                 });
@@ -93,6 +95,85 @@ function StudyPageContent() {
         return () => clearInterval(interval);
     }, [isActive, finished, isPlayingGame]);
 
+    // ...
+
+    const handleNotesComplete = (note?: string) => {
+        console.log('[StudyPage] handleNotesComplete called. Note:', note, 'PendingAction:', pendingAction);
+        setSessionNote(note);
+        setShowNotesModal(false);
+
+        if (pendingAction === 'break') {
+            setShowBreakModal(true);
+        } else if (pendingAction === 'finish') {
+            // Proceed to end session
+            finalizeSession(note);
+        }
+        setPendingAction(null);
+    };
+
+    const handleManualEndSession = () => {
+        setIsActive(false);
+        setPendingAction('finish');
+        setShowNotesModal(true);
+    };
+
+    const generateUUID = () => {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+            var r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    };
+
+    const finalizeSession = async (noteArg?: string) => {
+        // Use provided note or fallback to state
+        const noteToSave = noteArg !== undefined ? noteArg : sessionNote;
+        console.log('[StudyPage] Finalizing Session. Note:', noteToSave);
+
+        const timePoints = Math.floor(seconds * 0.46);
+
+        // Weekly Bonus Check
+        let bonusPoints = 0;
+        if (targetClass) {
+            const currentTotal = weeklyMinutes;
+            const newSessionMinutes = Math.ceil(seconds / 60);
+            const goal = targetClass.weeklyGoalMinutes;
+
+            if (currentTotal < goal && (currentTotal + newSessionMinutes) >= goal) {
+                bonusPoints = 100;
+            }
+        }
+
+        const totalPoints = timePoints + gameCoins + bonusPoints;
+
+        // Save session FIRST to ensure state is updated before navigation
+        if (targetClass) {
+            const sessionPayload = {
+                id: generateUUID(),
+                classId: targetClass.id,
+                durationMinutes: Math.ceil(seconds / 60),
+                timestamp: Date.now(),
+                pointsEarned: totalPoints,
+                notes: noteToSave // Save the note!
+            };
+            console.log('[StudyPage] Recording Session:', sessionPayload);
+            await recordSession(sessionPayload);
+        }
+
+        // Then update local state cleanliness
+        setIsActive(false);
+        setFinished(true);
+        clearActiveSession();
+
+        // Navigate LAST
+        if (targetClass) {
+            router.replace(`/dashboard?earned=${totalPoints}&winner=true`);
+        } else {
+            router.replace('/dashboard');
+        }
+    };
+
+    // NOTE: Replace original endSession with finalizeSession logic or wrapper
+    const endSession = handleManualEndSession;
     // Check for Goal Completion
     useEffect(() => {
         if (!targetClass || hasShownGoalModal) return;
@@ -215,46 +296,7 @@ function StudyPageContent() {
         };
     }, [isActive, finished, isPlayingGame, seconds]); // 'seconds' added to catch time jumps
 
-    const endSession = async () => {
-        // Navigate FIRST to avoid flash of paused UI
-        const timePoints = Math.floor(seconds * 0.46);
 
-        // Weekly Bonus Check
-        let bonusPoints = 0;
-        if (targetClass) {
-            const currentTotal = weeklyMinutes;
-            const newSessionMinutes = Math.ceil(seconds / 60);
-            const goal = targetClass.weeklyGoalMinutes;
-
-            if (currentTotal < goal && (currentTotal + newSessionMinutes) >= goal) {
-                bonusPoints = 100;
-            }
-        }
-
-        const totalPoints = timePoints + gameCoins + bonusPoints;
-
-        // Navigate immediately
-        if (targetClass) {
-            router.replace(`/dashboard?earned=${totalPoints}&winner=true`);
-        } else {
-            router.replace('/dashboard');
-        }
-
-        // Then update state and save session (happens after navigation starts)
-        setIsActive(false);
-        setFinished(true);
-        clearActiveSession();
-
-        if (targetClass) {
-            await recordSession({
-                id: generateUUID(),
-                classId: targetClass.id,
-                durationMinutes: Math.ceil(seconds / 60),
-                timestamp: Date.now(),
-                pointsEarned: totalPoints
-            });
-        }
-    };
 
     const [showZenGuide, setShowZenGuide] = useState(false);
     const [returnToBreak, setReturnToBreak] = useState(false);
@@ -704,6 +746,13 @@ function StudyPageContent() {
                 </button>
             </div>
 
+            {/* Modals */}
+            <StudyNotesModal
+                isOpen={showNotesModal}
+                onSave={handleNotesComplete}
+                onSkip={() => handleNotesComplete(undefined)}
+            />
+
             {/* Break Modal */}
             <Modal
                 isOpen={showBreakModal}
@@ -712,9 +761,9 @@ function StudyPageContent() {
                 actions={
                     <>
                         <button className="btn btn-secondary" onClick={() => {
-                            setShowBreakModal(false);
-                            setIsActive(true);
-                        }}>Skip Break</button>
+                            // Finish Session instead of Skip Break (User Request)
+                            finalizeSession();
+                        }}>Finish Session 🏁</button>
                         <button className="btn btn-primary" onClick={() => {
                             if (targetClass) saveActiveSession(targetClass.id, seconds);
                             startBreak(5); // 5 Minutes

@@ -8,11 +8,9 @@ import { AdMobService } from '@/lib/admob';
 import { BreakEndedModal } from '@/components/games/BreakEndedModal';
 
 export default function GameHubPage() {
-    const { state, extendBreak, isLoading } = useApp();
+    const { state, isLoading } = useApp(); // extendBreak removed if not needed, or used for Ad reward
     const router = useRouter();
     const [showBreakModal, setShowBreakModal] = useState(false);
-
-
 
     const userAvatarItem = AVATARS.find(a => a.name === state.equippedAvatar);
     const userAvatarSrc = userAvatarItem ? userAvatarItem.filename : '/assets/idle.png';
@@ -47,33 +45,9 @@ export default function GameHubPage() {
         }
     ];
 
-    const [timeLeft, setTimeLeft] = useState(() => {
-        if (state.breakTimer.endTime) {
-            return Math.max(0, Math.ceil((state.breakTimer.endTime - Date.now()) / 1000));
-        }
-        return 0;
-    });
-
-    // Timer Logic
-    useEffect(() => {
-        const interval = setInterval(() => {
-            if (state.breakTimer.endTime) {
-                const diff = Math.ceil((state.breakTimer.endTime - Date.now()) / 1000);
-                setTimeLeft(Math.max(0, diff));
-            } else {
-                setTimeLeft(0);
-            }
-        }, 1000);
-        return () => clearInterval(interval);
-    }, [state.breakTimer.endTime]);
-
-    const formatTime = (s: number) => {
-        const m = Math.floor(s / 60);
-        const sec = s % 60;
-        return `${m}:${sec.toString().padStart(2, '0')}`;
-    };
-
     if (isLoading) return <div style={{ minHeight: '100vh', background: '#f5f5f5' }} />;
+
+    const gameTime = state.gameTimeBank || 0;
 
     return (
         <main className="container" style={{ padding: '24px', paddingTop: 'calc(env(safe-area-inset-top) + 24px)' }}>
@@ -100,11 +74,9 @@ export default function GameHubPage() {
                     >
                         🏆 Top 100
                     </button>
-                    {state.breakTimer.isActive && (
-                        <div style={{ background: timeLeft <= 0 ? '#e74c3c' : (timeLeft <= 30 ? '#e74c3c' : '#27ae60'), color: 'white', padding: '8px 16px', borderRadius: '20px', fontWeight: 'bold' }}>
-                            {timeLeft <= 0 ? 'Break Over' : formatTime(timeLeft)}
-                        </div>
-                    )}
+                    <div style={{ background: gameTime <= 0 ? '#e74c3c' : '#27ae60', color: 'white', padding: '8px 16px', borderRadius: '20px', fontWeight: 'bold' }}>
+                        {gameTime <= 0 ? 'No Game Time' : `Game Money: ${gameTime}m`}
+                    </div>
                 </div>
             </header>
 
@@ -112,7 +84,9 @@ export default function GameHubPage() {
                 <img src={userAvatarSrc} style={{ width: '60px', height: '60px', objectFit: 'contain', imageRendering: 'pixelated' }} />
                 <div>
                     <h3 style={{ margin: 0 }}>Ready to play?</h3>
-                    <p style={{ margin: 0, color: '#666', fontSize: '0.9rem' }}>Choose a game to unwind.</p>
+                    <p style={{ margin: 0, color: '#666', fontSize: '0.9rem' }}>
+                        You have {gameTime} minutes of game time available.
+                    </p>
                 </div>
             </div>
 
@@ -122,10 +96,7 @@ export default function GameHubPage() {
                         key={game.id}
                         className="card"
                         onClick={() => {
-                            // Enforce timer? Or allow peek?
-                            // User said "Only get 5 mins combined".
-                            // If timer <= 0, prevent play.
-                            if (state.breakTimer.isActive && timeLeft <= 0) {
+                            if (gameTime <= 0) {
                                 setShowBreakModal(true);
                                 return;
                             }
@@ -138,7 +109,7 @@ export default function GameHubPage() {
                             cursor: 'pointer',
                             background: `linear-gradient(135deg, ${game.color}22 0%, white 100%)`, // Light tint
                             borderLeft: `6px solid ${game.color}`,
-                            opacity: (state.breakTimer.isActive && timeLeft <= 0) ? 0.5 : 1
+                            opacity: (gameTime <= 0) ? 0.5 : 1
                         }}
                     >
                         <div style={{ width: '96px', height: '96px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -156,11 +127,10 @@ export default function GameHubPage() {
             {
                 showBreakModal && (
                     <BreakEndedModal
-                        canWatchAd={!state.breakTimer.hasClaimedAd}
-                        onWatchAd={() => {
-                            extendBreak(1);
-                            setShowBreakModal(false);
-                        }}
+                        canWatchAd={false} // Disable ad reward for now, they need to study
+                        title="Out of Game Time!"
+                        message="You've used all your game time! Study more to earn more time."
+                        onWatchAd={() => { }}
                         onExit={() => router.push('/study')}
                     />
                 )

@@ -4,18 +4,26 @@ import { NativePurchases, Transaction } from '@capgo/native-purchases';
 // Product ID Mapping
 // Internal App ID -> App Store / Play Store ID
 // REPLACE these with your actual IDs from App Store Connect
+
+// Toggle for Production
+const IS_PRODUCTION = true; // Set to TRUE for Release
+
 export const PRODUCT_MAP: Record<string, string> = {
     // Generic Tier Consumables for Avatar Unlocks
-    'avatar_tier1': 'com.learnloop.learnloop.avatar.tier1', // $0.99 (Starter)
-    'avatar_tier2': 'com.learnloop.learnloop.avatar.tier2', // $1.99 (Rare)
-    'avatar_tier3': 'com.learnloop.learnloop.avatar.tier3', // $4.99 (Legendary)
+    'avatar_tier1': IS_PRODUCTION ? 'com.learnloop.learnloop.avatar.tier1' : 'com.learnloop.learnloop.avatar.tier1',
+    'avatar_tier2': IS_PRODUCTION ? 'com.learnloop.learnloop.avatar.tier2' : 'com.learnloop.learnloop.avatar.tier2',
+    'avatar_tier3': IS_PRODUCTION ? 'com.learnloop.learnloop.avatar.tier3' : 'com.learnloop.learnloop.avatar.tier3',
 
     // Parent Gifting Rewards
-    'com.learnloop.reward.break_15': 'com.learnloop.learnloop.reward.break_15', // 15m Break Gift
+    // (Note: break_15 ID was missing from request, checking if existing matches pattern)
+    // Assuming break_15 follows pattern or reusing previous if strictly needed.
+    // User didn't provide break_15 ID in chat, but listed "15 Min Break ($X.XX): ___" in my request.
+    // I will use a placeholder that matches the pattern: com.learnloop.learnloop.reward.break_15
+    // And for premium: com.learnloop.learnloop.premium
+    'com.learnloop.reward.break_15': IS_PRODUCTION ? 'com.learnloop.learnloop.reward.break_15' : 'com.learnloop.reward.break_15',
 
-    // One-time non-consumables (Avatars/Items if sold directly)
-    // currently we only sell coin packs or "Premium"
-    'premium_upgrade': 'com.learnloop.learnloop.premium', // Remove Ads
+    // One-time non-consumables
+    'premium_upgrade': IS_PRODUCTION ? 'com.learnloop.learnloop.premium' : 'com.learnloop.premium',
 };
 
 export async function initializeIAP() {
@@ -25,10 +33,10 @@ export async function initializeIAP() {
     }
 
     try {
-        await NativePurchases.restorePurchases();
-        console.log('[IAP] Purchases restored/synced');
+        // await NativePurchases.restorePurchases(); // CAUSES APPLE LOGIN PROMPT ON START
+        console.log('[IAP] Initialization complete (restore skipped)');
     } catch (err) {
-        console.error('[IAP] Failed to restore/init purchases:', err);
+        console.error('[IAP] Failed to init purchases:', err);
     }
 }
 

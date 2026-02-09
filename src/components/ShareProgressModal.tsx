@@ -34,17 +34,15 @@ export default function ShareProgressModal({
             ? `🎉 I completed ALL my study goals this week on Learn Loop! 📚✨`
             : `🎉 I hit my ${className} study goal! Studied ${Math.round(minutesStudied)} mins this week! 📚✨`;
 
-        const giftLink = user?.id
-            ? `https://learnloop.app/gift?userId=${user.id}` // Changed domain to learnloop.app
-            : 'https://apps.apple.com/app/learn-loop'; // Changed app name
+        const downloadLink = `https://learnloop.app/invite?id=${user?.id || ''}`;
 
-        const fullMessage = `${achievementText}\n\nWant to reward me? Tap here to send a gift! 🎁\n${giftLink}`;
+        const fullMessage = `${achievementText}\nDownload Learn Loop to see my hard work!\n${downloadLink}`;
 
         if (navigator.share) {
             navigator.share({
                 title: 'Study Progress',
-                text: fullMessage, // Using the constructed fullMessage
-                url: giftLink // Using the constructed giftLink
+                text: fullMessage,
+                url: downloadLink
             }).catch(console.error);
         } else {
             // Open SMS with pre-filled message as fallback

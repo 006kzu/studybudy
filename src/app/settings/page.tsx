@@ -2,7 +2,7 @@
 
 import { useApp } from '@/context/AppContext';
 import { useState } from 'react';
-import { purchaseItem } from '@/lib/iap';
+import { purchaseItem, restorePurchases } from '@/lib/iap';
 import Link from 'next/link';
 
 // ...
@@ -73,6 +73,8 @@ export default function SettingsPage() {
                 </div>
             )}
 
+
+
             <div className="card">
                 <h2 className="text-h2">🔔 Notifications</h2>
 
@@ -136,14 +138,14 @@ export default function SettingsPage() {
 
             <div className="card">
                 <h2 className="text-h2">🧘 Zen Mode</h2>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', gap: '16px' }}>
                     <div>
                         <div style={{ fontWeight: 600 }}>Focus Mode Guide</div>
-                        <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
-                            Show reminder to use Guided Access when studying.
+                        <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
+                            Show reminder to use Guided Access.
                         </div>
                     </div>
-                    <label className="switch">
+                    <label className="switch" style={{ flexShrink: 0 }}>
                         <input
                             type="checkbox"
                             checked={state.zenMode ?? false}
@@ -154,11 +156,15 @@ export default function SettingsPage() {
                 </div>
                 {state.zenMode && (
                     <div style={{ marginTop: '12px', padding: '12px', background: '#f0f9ff', borderRadius: '8px', fontSize: '0.85rem', color: '#005580' }}>
-                        <p style={{ marginBottom: '8px' }}>
-                            ℹ️ <strong>How it works:</strong> When you start a session, we'll remind you to enable <strong>Guided Access</strong> (Triple-click Side Button) to lock your phone to StudyBudy and block other apps.
+                        <p style={{ marginBottom: '8px', lineHeight: '1.4' }}>
+                            ℹ️ <strong>How to use:</strong>
                         </p>
+                        <ol style={{ paddingLeft: '20px', margin: '0 0 12px 0' }}>
+                            <li style={{ marginBottom: '4px' }}>Go to <strong>Settings &gt; Accessibility &gt; Guided Access</strong> and turn it ON.</li>
+                            <li>Open StudyBudy and <strong>Triple-click</strong> the Side Button to lock.</li>
+                        </ol>
                         <a
-                            href="App-Prefs:root=General&path=ACCESSIBILITY"
+                            href="App-Prefs:root=ACCESSIBILITY"
                             style={{
                                 display: 'inline-block',
                                 color: '#005580',
@@ -166,7 +172,7 @@ export default function SettingsPage() {
                                 fontWeight: 600
                             }}
                         >
-                            Go to Accessibility Settings →
+                            Open Accessibility Settings →
                         </a>
                     </div>
                 )}
@@ -461,6 +467,24 @@ export default function SettingsPage() {
                     }
                 }}
             />
+
+            {/* Restore Purchases Link (Bottom) */}
+            <div style={{ textAlign: 'center', marginBottom: '24px', marginTop: '32px' }}>
+                <button
+                    onClick={async () => {
+                        try {
+                            await restorePurchases();
+                            alert('Restore process initiated. If you have valid purchases, they will be restored.');
+                        } catch (e) {
+                            alert('Restore failed.');
+                        }
+                    }}
+                    className="btn"
+                    style={{ background: 'transparent', color: '#666', fontSize: '0.9rem', border: 'none', textDecoration: 'underline' }}
+                >
+                    Restore Purchases
+                </button>
+            </div>
 
             <div className="text-center" style={{ marginTop: '32px', opacity: 0.5, fontSize: '0.8rem' }}>
                 Learn Loop v1.0.0

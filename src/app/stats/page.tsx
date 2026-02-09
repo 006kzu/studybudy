@@ -77,29 +77,29 @@ export default function StatsPage() {
     // Simple milestones for now
     const achievements = [
         // Easy / Starter
-        { id: 'first_step', title: 'First Step', desc: 'Study for 15 minutes', thresholdMin: 15, icon: <img src="/icons/icon_achievements_first_step.png" alt="First Step" style={{ width: '72px', height: '72px' }} /> },
-        { id: 'scholar', title: 'Scholar', desc: 'Study for 10 hours', thresholdMin: 600, icon: <img src="/icons/icon_achievements_scholar.png" alt="Scholar" style={{ width: '72px', height: '72px' }} /> },
+        { id: 'first_step', title: 'First Step', desc: 'Study for 15 minutes', thresholdMin: 15, iconSrc: '/icons/icon_achievements_first_step.png' },
+        { id: 'scholar', title: 'Scholar', desc: 'Study for 10 hours', thresholdMin: 600, iconSrc: '/icons/icon_achievements_scholar.png' },
 
         // Hours Milestones
-        { id: 'dedicated', title: 'Dedicated', desc: 'Study for 50 hours', thresholdMin: 3000, icon: '📚' },
-        { id: 'master', title: 'Master', desc: 'Study for 100 hours', thresholdMin: 6000, icon: '🧙‍♂️' },
-        { id: 'obsessed', title: 'Obsessed', desc: 'Study for 200 hours', thresholdMin: 12000, icon: '🧠' },
-        { id: 'einstein', title: 'Einstein', desc: 'Study for 500 hours', thresholdMin: 30000, icon: '⚡' },
-        { id: 'time_lord', title: 'Time Lord', desc: 'Study for 1000 hours', thresholdMin: 60000, icon: '⏳' },
+        { id: 'dedicated', title: 'Dedicated', desc: 'Study for 50 hours', thresholdMin: 3000, iconSrc: '/icons/icon_achievements_dedicated.png' },
+        { id: 'master', title: 'Master', desc: 'Study for 100 hours', thresholdMin: 6000, iconSrc: '/icons/icon_achievements_master.png' },
+        { id: 'obsessed', title: 'Obsessed', desc: 'Study for 200 hours', thresholdMin: 12000, iconSrc: '/icons/icon_achievements_obsessed.png' },
+        { id: 'einstein', title: 'Einstein', desc: 'Study for 500 hours', thresholdMin: 30000, iconSrc: '/icons/icon_achievements_einstein.png' },
+        { id: 'time_lord', title: 'Time Lord', desc: 'Study for 1000 hours', thresholdMin: 60000, iconSrc: '/icons/icon_achievements_time_lord.png' },
 
         // Wealth Milestones
-        { id: 'rich', title: 'Rich Dog', desc: 'Earn 1000 Coins', thresholdCoins: 1000, icon: '💰' },
-        { id: 'hoarder', title: 'Coin Hoarder', desc: 'Earn 2,500 Coins', thresholdCoins: 2500, icon: '🏦' },
-        { id: 'tycoon', title: 'Tycoon', desc: 'Earn 5,000 Coins', thresholdCoins: 5000, icon: '🤑' },
+        { id: 'rich', title: 'Rich Dog', desc: 'Earn 1000 Coins', thresholdCoins: 1000, iconSrc: '/icons/icon_achievements_rich_dog.png' },
+        { id: 'hoarder', title: 'Coin Hoarder', desc: 'Earn 2,500 Coins', thresholdCoins: 2500, iconSrc: '/icons/icon_achievements_coin_hoarder.png' },
+        { id: 'tycoon', title: 'Tycoon', desc: 'Earn 5,000 Coins', thresholdCoins: 5000, iconSrc: '/icons/icon_achievements_tycoon.png' },
 
         // Collection Milestones
-        { id: 'collector', title: 'Collector', desc: 'Own 3 Avatars', thresholdItems: 3, icon: '🎨' },
-        { id: 'fashionista', title: 'Fashionista', desc: 'Own 5 Avatars', thresholdItems: 5, icon: '👗' },
-        { id: 'menagerie', title: 'The Menagerie', desc: 'Own 10 Avatars', thresholdItems: 10, icon: '🦁' },
+        { id: 'collector', title: 'Collector', desc: 'Own 3 Avatars', thresholdItems: 3, iconSrc: '/icons/icon_achievements_collector.png' },
+        { id: 'fashionista', title: 'Fashionista', desc: 'Own 5 Avatars', thresholdItems: 5, iconSrc: '/icons/icon_achievements_fashionista.png' },
+        { id: 'menagerie', title: 'The Menagerie', desc: 'Own 10 Avatars', thresholdItems: 10, iconSrc: '/icons/icon_achievements_menagerie.png' },
 
         // Special Stats
-        { id: 'jack', title: 'Jack of All Trades', desc: 'Study 5 different classes for 1+ hour each', special: 'jack', icon: '🛠️' },
-        { id: 'specialist', title: 'Specialist', desc: 'Study a single class for 50+ hours', special: 'specialist', icon: '🔬' },
+        { id: 'jack', title: 'Jack of All Trades', desc: 'Study 5 different classes for 1+ hour each', special: 'jack', iconSrc: '/icons/icon_achievements_jack_of_all_trades.png' },
+        { id: 'specialist', title: 'Specialist', desc: 'Study a single class for 50+ hours', special: 'specialist', iconSrc: '/icons/icon_achievements_specialist.png' },
     ];
 
     return (
@@ -259,7 +259,9 @@ export default function StatsPage() {
                                     border: isUnlocked ? '2px solid var(--color-primary)' : '1px solid #eee'
                                 }}
                             >
-                                <div style={{ fontSize: '2rem', marginBottom: '8px' }}>{ach.icon}</div>
+                                <div style={{ fontSize: '2rem', marginBottom: '8px', display: 'flex', justifyContent: 'center' }}>
+                                    <img src={ach.iconSrc} alt={ach.title} style={{ width: '72px', height: '72px' }} />
+                                </div>
                                 <h3 style={{ fontWeight: 700, fontSize: '0.9rem', marginBottom: '4px' }}>{ach.title}</h3>
                                 <p style={{ fontSize: '0.7rem', color: isUnlocked ? 'var(--color-text-secondary)' : '#999' }}>{ach.desc}</p>
                                 {!isUnlocked && <div style={{ fontSize: '0.7rem', marginTop: '8px', color: '#999' }}>🔒 Locked</div>}

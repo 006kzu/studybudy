@@ -253,6 +253,21 @@ export default function Game2048Page() {
         setStartTouch(null);
     };
 
+    // Prevent default touch behavior (scrolling) aggressively
+    // Apply to document body to capture ALL touches
+    useEffect(() => {
+        const handleTouchMove = (e: TouchEvent) => {
+            e.preventDefault();
+        };
+
+        // Passive: false is crucial to allow preventDefault
+        document.body.addEventListener('touchmove', handleTouchMove, { passive: false });
+
+        return () => {
+            document.body.removeEventListener('touchmove', handleTouchMove);
+        };
+    }, []);
+
     // --- Rendering ---
     const getTileStyle = (val: number) => {
         const baseStyle: React.CSSProperties = {
@@ -299,7 +314,8 @@ export default function Game2048Page() {
 
     return (
         <div style={{
-            minHeight: '100vh',
+            height: '100vh',
+            overflow: 'hidden',
             background: '#09090b', // Deep dark
             padding: '20px',
             display: 'flex',
@@ -307,7 +323,8 @@ export default function Game2048Page() {
             alignItems: 'center',
             color: '#fff',
             fontFamily: 'monospace', // Cyberpunk terminal font
-            paddingTop: 'calc(env(safe-area-inset-top) + 40px)' // Move down
+            paddingTop: 'calc(env(safe-area-inset-top) + 40px)', // Move down
+            touchAction: 'none'
         }} onPointerDown={handleTouchStart} onPointerUp={handleTouchEnd}>
             {/* Exit Button */}
             <button
@@ -418,7 +435,6 @@ export default function Game2048Page() {
 
 
 
-            {/* Leaderboard Placement Popup */}
             {leaderboardRank !== null && (
                 <LeaderboardPlacementPopup
                     rank={leaderboardRank}
@@ -427,6 +443,19 @@ export default function Game2048Page() {
                     onClose={() => setLeaderboardRank(null)}
                 />
             )}
+
+            <style jsx global>{`
+                html, body {
+                    margin: 0;
+                    padding: 0;
+                    width: 100%;
+                    height: 100%;
+                    position: fixed;
+                    overflow: hidden !important;
+                    overscroll-behavior: none !important;
+                    touch-action: none !important;
+                }
+            `}</style>
         </div>
     );
 }

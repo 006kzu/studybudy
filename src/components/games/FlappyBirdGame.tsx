@@ -205,31 +205,44 @@ export default function FlappyBirdGame({ avatarSrc, onExit, timeLeft }: FlappyBi
     // Check for Time's Up
     // Removed auto-exit logic. Let game finish.
 
-    // Format time mm:ss
-    const formatTime = (s: number) => {
-        const m = Math.floor(s / 60);
-        const sec = s % 60;
-        return `${m}:${sec.toString().padStart(2, '0')}`;
-    };
+    // Calculate Time Left based on Game Bank
+    const gameTime = state.gameTimeBank || 0;
+    // We can use a local timer to visualize seconds, but the bank is in minutes.
+    // Let's just stick to minutes or assume the Layout handles the decrement.
+    // The Layout handles the decrement every minute.
+    // We can show "Xm" or switch to "gameTime" prop if passed, but context is safer.
 
-    const handleGameOver = () => {
+    const handleGameOver = async () => {
+        if (reqRef.current) cancelAnimationFrame(reqRef.current);
+        const score = scoreVal.current;
+
+        // Ad Logic
+        const adPending = sessionStorage.getItem('ad_pending');
+        if (adPending === 'true') {
+            console.log('[Flappy] Ad Pending, showing interstitial...');
+            try {
+                // Stop rendering loop? Already stopped via cancelAnimationFrame
+                await AdMobService.showInterstitial();
+                sessionStorage.removeItem('ad_pending');
+            } catch (e) {
+                console.error('Ad failed', e);
+            }
+        }
+
         setGameState('GAME_OVER');
         const currentHigh = state.highScores['flappy-bird'] || 0;
-        if (scoreVal.current > currentHigh) {
-            setHighScore(scoreVal.current);
+        if (score > currentHigh) {
+            setHighScore(score);
             setIsNewRecord(true);
-            updateHighScore('flappy-bird', scoreVal.current);
+            updateHighScore('flappy-bird', score);
         }
         // Submit to global leaderboard
-        submitGameScore('flappy-bird', scoreVal.current).then(rank => {
+        submitGameScore('flappy-bird', score).then(rank => {
             if (rank !== null) {
                 setLeaderboardRank(rank);
             }
         });
-        if (reqRef.current) cancelAnimationFrame(reqRef.current);
 
-        // If time is up, exit immediately instead of showing game over screen
-        // CHANGED: Do not exit. Show Game Over screen (which will block retry).
     };
 
     const handleInput = () => {
@@ -239,7 +252,12 @@ export default function FlappyBirdGame({ avatarSrc, onExit, timeLeft }: FlappyBi
                 birdVelocity.current = canvasRef.current.height * -0.01;
             }
         } else if (gameState === 'START' || gameState === 'GAME_OVER') {
-            if (timeLeft > 0) startGame();
+            // Check Game Time
+            if (state.gameTimeBank <= 0) {
+                // Do nothing, UI will show BreakEndedModal
+                return;
+            }
+            startGame();
         }
     };
     // ...
@@ -254,7 +272,7 @@ export default function FlappyBirdGame({ avatarSrc, onExit, timeLeft }: FlappyBi
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [gameState, timeLeft]);
+    }, [gameState, state.gameTimeBank]);
 
     return (
         <div
@@ -284,7 +302,7 @@ export default function FlappyBirdGame({ avatarSrc, onExit, timeLeft }: FlappyBi
                 top: 'calc(env(safe-area-inset-top) + 20px)',
                 left: '50%',
                 transform: 'translateX(-50%)',
-                background: timeLeft <= 0 ? '#e74c3c' : (timeLeft <= 30 ? '#e74c3c' : 'rgba(0,0,0,0.5)'),
+                background: state.gameTimeBank <= 0 ? '#e74c3c' : '#27ae60',
                 color: 'white',
                 padding: '8px 16px',
                 borderRadius: '20px',
@@ -293,7 +311,7 @@ export default function FlappyBirdGame({ avatarSrc, onExit, timeLeft }: FlappyBi
                 pointerEvents: 'none',
                 transition: 'background 0.3s'
             }}>
-                Break Time: {formatTime(timeLeft)}
+                Game Time: {state.gameTimeBank}m
             </div>
 
             {/* UI Overlays */}
@@ -306,12 +324,13 @@ export default function FlappyBirdGame({ avatarSrc, onExit, timeLeft }: FlappyBi
             )}
 
             {gameState === 'GAME_OVER' && (
-                timeLeft <= 0 ? (
+                state.gameTimeBank <= 0 ? (
                     <BreakEndedModal
-                        canWatchAd={!state.breakTimer.hasClaimedAd}
+                        canWatchAd={false}
+                        title="Out of Game Time"
+                        message="You've used all your game time! Return to study mode to earn more."
                         onWatchAd={async () => {
-                            await extendBreak(1);
-                            // No reload needed; state update will close modal
+                            // await extendBreak(1);
                         }}
                         onExit={() => router.push('/study')}
                     />

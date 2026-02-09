@@ -8,11 +8,14 @@ import { AVATARS } from '@/constants/avatars';
 import Modal from '@/components/Modal';
 import Toast from '@/components/Toast';
 import { purchaseItem } from '@/lib/iap';
+import { supabase } from '@/lib/supabase';
 
 export default function ShopPage() {
-    const { state, buyItem, equipAvatar } = useApp();
+    const { state, buyItem, redeemCharacterCredit, equipAvatar, user } = useApp();
     const [toastMsg, setToastMsg] = useState<{ msg: string, type: 'error' | 'success' } | null>(null);
     const [selectedItem, setSelectedItem] = useState<{ name: string, price: number, filename: string } | null>(null);
+    const [successModalOpen, setSuccessModalOpen] = useState(false);
+    const [unlockedItem, setUnlockedItem] = useState<{ name: string, filename: string } | null>(null);
 
     // Filter out "Default Dog" if you don't want to sell it (it's price 0, implies owned)
     // Or keep it to show "Equipped"
@@ -21,12 +24,15 @@ export default function ShopPage() {
     const ownedCount = state.inventory ? state.inventory.length : 0;
     const totalCount = ITEMS.length;
 
-    // Helper to determine Tier/Category
+    // Query unredeemed character tier gifts
+
+
     const getCategory = (price: number, name: string) => {
         if (name === 'Golden Munchkin Cat') return { name: 'Mythical', color: '#ffd700', tier: 'exclusive', cost: 'Points Only' };
         if (price < 20000) return { name: 'Starter Pal', color: '#4CAF50', tier: 'tier1', cost: '$0.99' };
         if (price < 100000) return { name: 'Rare Companion', color: '#2196F3', tier: 'tier2', cost: '$1.99' };
-        return { name: 'Legendary Friend', color: '#9C27B0', tier: 'tier3', cost: '$4.99' };
+        if (price <= 200000) return { name: 'Epic Companion', color: '#a855f7', tier: 'tier3', cost: '$3.99' };
+        return { name: 'Legendary Friend', color: '#9C27B0', tier: 'tier4', cost: '$4.99' };
     };
 
     const handleAction = (item: { name: string, price: number, filename: string }) => {
@@ -48,7 +54,9 @@ export default function ShopPage() {
         if (selectedItem) {
             buyItem(selectedItem.name, selectedItem.price);
             equipAvatar(selectedItem.name);
-            setToastMsg({ msg: `${selectedItem.name} unlocked!`, type: 'success' });
+            // Show Success Modal
+            setUnlockedItem(selectedItem);
+            setSuccessModalOpen(true);
             setSelectedItem(null);
         }
     };
@@ -63,6 +71,52 @@ export default function ShopPage() {
                     ← Back to Dashboard
                 </Link>
             </div>
+
+            {/* Credit Wallet Display */}
+            {(state.characterCredits.legendary > 0 || state.characterCredits.epic > 0 || state.characterCredits.rare > 0) && (
+                <div className="animate-fade-in" style={{
+                    background: 'linear-gradient(135deg, #f43f5e 0%, #fb923c 100%)',
+                    color: 'white',
+                    padding: '16px',
+                    borderRadius: '16px',
+                    marginBottom: '24px',
+                    boxShadow: '0 4px 6px -1px rgba(249, 115, 22, 0.2)'
+                }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                        <span style={{ fontSize: '1.2rem' }}>🎟️</span>
+                        <div style={{ fontWeight: 700, fontSize: '1rem' }}>Your Gift Credits</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                        {state.characterCredits.legendary > 0 && (
+                            <div style={{
+                                background: 'rgba(255,255,255,0.2)', padding: '6px 12px', borderRadius: '8px', fontSize: '0.9rem', fontWeight: 700,
+                                display: 'flex', alignItems: 'center'
+                            }}>
+                                <img src="/assets/avatar_dragon.png" alt="Legendary" style={{ width: '24px', height: '24px', objectFit: 'contain', marginRight: '8px' }} />
+                                {state.characterCredits.legendary} Legendary
+                            </div>
+                        )}
+                        {state.characterCredits.epic > 0 && (
+                            <div style={{
+                                background: 'rgba(255,255,255,0.2)', padding: '6px 12px', borderRadius: '8px', fontSize: '0.9rem', fontWeight: 700,
+                                display: 'flex', alignItems: 'center'
+                            }}>
+                                <img src="/assets/avatar_lion.png" alt="Epic" style={{ width: '24px', height: '24px', objectFit: 'contain', marginRight: '8px' }} />
+                                {state.characterCredits.epic} Epic
+                            </div>
+                        )}
+                        {state.characterCredits.rare > 0 && (
+                            <div style={{
+                                background: 'rgba(255,255,255,0.2)', padding: '6px 12px', borderRadius: '8px', fontSize: '0.9rem', fontWeight: 700,
+                                display: 'flex', alignItems: 'center'
+                            }}>
+                                <img src="/assets/avatar_fox.png" alt="Rare" style={{ width: '24px', height: '24px', objectFit: 'contain', marginRight: '8px' }} />
+                                {state.characterCredits.rare} Rare
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
 
             <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
                 <div>
@@ -296,14 +350,16 @@ export default function ShopPage() {
                                                 // Map Tier to Product ID
                                                 let productId = 'avatar_tier1';
                                                 if (selectedCategory.tier === 'tier2') productId = 'avatar_tier2';
-                                                if (selectedCategory.tier === 'tier3') productId = 'avatar_tier3';
+                                                if (selectedCategory.tier === 'tier3') productId = 'avatar_tier3'; // Epic
+                                                if (selectedCategory.tier === 'tier4') productId = 'avatar_tier4'; // Legendary
 
                                                 const success = await purchaseItem(productId);
                                                 if (success) {
                                                     // Buy with 0 coin cost (Real Money paid via IAP)
                                                     buyItem(selectedItem.name, 0);
                                                     equipAvatar(selectedItem.name);
-                                                    setToastMsg({ msg: `${selectedItem.name} Unlocked!`, type: 'success' });
+                                                    setUnlockedItem(selectedItem);
+                                                    setSuccessModalOpen(true);
                                                     setSelectedItem(null);
                                                 }
                                             } catch (e) {
@@ -317,6 +373,47 @@ export default function ShopPage() {
                                     <span>{selectedCategory.cost}</span>
                                 </button>
                             )}
+
+                            {/* Option 3: Gift Credit (if available for this tier) */}
+                            {selectedCategory && (
+                                (selectedCategory.tier === 'tier2' && state.characterCredits.rare > 0) ||
+                                (selectedCategory.tier === 'tier3' && state.characterCredits.epic > 0) ||
+                                (selectedCategory.tier === 'tier4' && state.characterCredits.legendary > 0)
+                            ) && (
+                                    <button
+                                        className="btn"
+                                        style={{
+                                            background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)',
+                                            color: 'white',
+                                            border: 'none',
+                                            padding: '16px',
+                                            borderRadius: '16px',
+                                            fontWeight: 700,
+                                            fontSize: '1rem',
+                                            display: 'flex',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'center',
+                                            paddingLeft: '24px',
+                                            paddingRight: '24px',
+                                            marginTop: '4px',
+                                            boxShadow: '0 4px 12px rgba(34, 197, 94, 0.3)'
+                                        }}
+                                        onClick={async () => {
+                                            if (!selectedItem) return;
+                                            let tier: 'legendary' | 'epic' | 'rare' = 'rare';
+                                            if (selectedCategory.tier === 'tier4') tier = 'legendary';
+                                            if (selectedCategory.tier === 'tier3') tier = 'epic';
+
+                                            await redeemCharacterCredit(tier, selectedItem.name);
+                                            setUnlockedItem(selectedItem);
+                                            setSuccessModalOpen(true);
+                                            setSelectedItem(null);
+                                        }}
+                                    >
+                                        <span>🎁 Use Gift Credit</span>
+                                        <span>FREE</span>
+                                    </button>
+                                )}
 
                             {/* Cancel Button */}
                             <button
@@ -346,6 +443,55 @@ export default function ShopPage() {
                     onClose={() => setToastMsg(null)}
                 />
             )}
-        </main>
+
+
+            {/* Success Modal */}
+            <Modal
+                isOpen={successModalOpen}
+                onClose={() => setSuccessModalOpen(false)}
+                title="Congratulations! 🎉"
+                actions={
+                    <button className="btn btn-primary" onClick={() => setSuccessModalOpen(false)}>
+                        Back to Shop
+                    </button>
+                }
+            >
+                {unlockedItem && (
+                    <div style={{ textAlign: 'center', padding: '20px' }}>
+                        <div style={{
+                            width: '140px',
+                            height: '140px',
+                            margin: '0 auto 24px',
+                            background: 'radial-gradient(circle, #fff9c4 0%, #ffffff 70%)',
+                            borderRadius: '50%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            boxShadow: '0 0 30px rgba(255, 215, 0, 0.4)',
+                            animation: 'pulse 2s infinite'
+                        }}>
+                            <img
+                                src={unlockedItem.filename}
+                                alt={unlockedItem.name}
+                                style={{
+                                    width: '100px',
+                                    height: '100px',
+                                    objectFit: 'contain',
+                                    imageRendering: 'pixelated'
+                                }}
+                            />
+                        </div>
+                        <h3 className="text-h2" style={{ marginBottom: '8px', color: 'var(--color-primary)' }}>
+                            New Study Buddy!
+                        </h3>
+                        <p className="text-body" style={{ color: 'var(--color-text-secondary)', marginBottom: '16px' }}>
+                            You've unlocked <strong>{unlockedItem.name}</strong>.
+                            <br />
+                            They are now equipped!
+                        </p>
+                    </div>
+                )}
+            </Modal>
+        </main >
     );
 }

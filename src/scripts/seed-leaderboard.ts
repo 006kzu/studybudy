@@ -59,9 +59,14 @@ export async function GET() {
                 continue;
             }
 
+            const fakeId = authData.user.id;
+            const daysAgo = Math.floor(Math.random() * 30);
+            const duration = Math.floor(Math.random() * 60) + 15; // 15-75 min session
+
             const date = new Date();
             date.setDate(date.getDate() - daysAgo);
 
+            // 2. Insert Study Session
             await supabase.from('study_sessions').insert({
                 user_id: fakeId,
                 class_id: 'fake-class-id', // Schema might not strictly enforce FK if class table RLS is loose, or just use NULL if allowed
@@ -69,22 +74,21 @@ export async function GET() {
                 created_at: date.toISOString(),
                 points_earned: duration * 2
             });
+
+            // 3. Insert Game Scores
+            const score = Math.floor(Math.random() * 35) + 5; // 5-40 score (Beatable!)
+            await supabase.from('game_scores').insert({
+                user_id: fakeId,
+                game_id: 'flappy_bird',
+                score: score,
+                created_at: new Date().toISOString()
+            });
+
+            results.push({ name, score });
         }
 
-        // 3. Insert Game Scores
-        const score = Math.floor(Math.random() * 35) + 5; // 5-40 score (Beatable!)
-        await supabase.from('game_scores').insert({
-            user_id: fakeId,
-            game_id: 'flappy_bird',
-            score: score,
-            created_at: new Date().toISOString()
-        });
-
-        results.push({ name, score });
-    }
-
         return NextResponse.json({ success: true, seeded: results });
-} catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
-}
+    } catch (e: any) {
+        return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+    }
 }

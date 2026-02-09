@@ -41,6 +41,7 @@ export type StudySession = {
     timestamp: number;
     pointsEarned: number;
     userId?: string;
+    notes?: string;
 };
 
 type AppState = {
@@ -76,6 +77,8 @@ type AppState = {
         endTime: number | null; // Timestamp
         hasClaimedAd: boolean;
     };
+    // Game Time Bank (Persistent)
+    gameTimeBank: number;
     // Persist active session during breaks
     activeSession: {
         classId: string;
@@ -87,6 +90,13 @@ type AppState = {
     isRoleSet: boolean; // True if role is saved in DB, false if using default
     linkedUserId?: string;
     lastRefreshed?: number;
+    notificationTier: 'none' | 'summary' | 'all';
+    // Character Tier Credits (Consumable)
+    characterCredits: {
+        legendary: number;
+        epic: number;
+        rare: number;
+    };
 };
 
 type AppContextType = {
@@ -106,10 +116,11 @@ type AppContextType = {
     addPoints: (amount: number) => Promise<void>;
     removePoints: (amount: number) => Promise<void>;
     buyItem: (itemName: string, cost: number) => Promise<void>;
+    redeemCharacterCredit: (tier: 'legendary' | 'epic' | 'rare', itemName: string) => Promise<void>;
     equipAvatar: (avatarName: string) => Promise<void>;
     completeOnboarding: (role?: 'student' | 'parent') => Promise<void>;
     updateSleepSettings: (settings: { enabled: boolean; start: string; end: string }) => Promise<void>;
-    updateSettings: (settings: { sleepSettings?: AppState['sleepSettings']; notifications?: AppState['notifications']; zenMode?: boolean; musicEnabled?: boolean }) => Promise<void>;
+    updateSettings: (settings: { sleepSettings?: AppState['sleepSettings']; notifications?: AppState['notifications']; zenMode?: boolean; musicEnabled?: boolean; notificationTier?: 'none' | 'summary' | 'all' }) => Promise<void>;
     scheduleStudyNotification: (minutes: number) => Promise<void>;
     cancelStudyNotification: () => Promise<void>;
     testNotification: () => Promise<void>;
@@ -130,7 +141,8 @@ type AppContextType = {
     clearActiveSession: () => void;
     updateHighScore: (gameId: string, score: number) => void;
     submitGameScore: (gameId: string, score: number) => Promise<number | null>; // Returns rank if on leaderboard, null otherwise
-    claimPendingGifts: () => Promise<{ coins: number; gameMinutes: number; senderName: string } | null>; // Claims any pending gifts
+    claimPendingGifts: () => Promise<{ coins: number; gameMinutes: number; senderName: string; giftCredits?: { legendary: number; epic: number; rare: number } } | null>; // Claims any pending gifts
+    consumeGameTime: (minutes: number) => Promise<void>; // Decrement Game Bank
 };
 
 const initialState: AppState = {
@@ -146,13 +158,20 @@ const initialState: AppState = {
     zenMode: false,
     isPremium: false,
     breakTimer: { isActive: false, endTime: null, hasClaimedAd: false },
+    gameTimeBank: 0,
     game4096: null,
     activeSession: null,
     highScores: {},
     role: 'student',
     isRoleSet: false,
     linkedUserId: undefined,
-    lastRefreshed: 0
+    lastRefreshed: 0,
+    notificationTier: 'summary',
+    characterCredits: {
+        legendary: 0,
+        epic: 0,
+        rare: 0
+    }
 };
 
 
@@ -204,12 +223,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                     }
 
                     if (access_token && refresh_token) {
-                        // Attempt to close browser immediately to prevent "stuck" UI
                         try {
+                            // Attempt to close browser immediately
                             await Browser.close();
-                        } catch (e) {
-                            // Ignore errors if browser is already closed or not open
-                        }
+                        } catch (e) { console.log('Browser close error (ignored):', e); }
 
                         const { error } = await supabase.auth.setSession({
                             access_token,
@@ -218,11 +235,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
                         if (!error) {
                             // Session set successfully
+                            console.log('[DeepLink] Session set, redirecting to Dashboard...');
+                            // Force hard reload or router replace? Router replace is smoother.
                             router.replace('/dashboard');
                         } else {
                             console.error('[DeepLink] Failed to set session:', error);
-                            // Only try to close if we haven't successfully closed yet? 
-                            // Just leave this one as a fallback for error cases, but suppress errors
+                            // Retry close just in case
                             setTimeout(() => Browser.close().catch(() => { }), 500);
                         }
                     }
@@ -246,48 +264,32 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             setIsLoading(false);
         };
 
-        init();
-
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-            console.log(`[AppContext] Auth Event: ${event}`, session?.user?.id);
-            const currentUser = session?.user || null;
-            setUser(currentUser);
-
-            if (currentUser) {
-                // Only load if validation passes and we haven't loaded for this user yet
-                if (lastFetchedUserId.current !== currentUser.id) {
-                    console.log('[AppContext] User changed (or first load), fetching data...');
-                    lastFetchedUserId.current = currentUser.id;
-
-                    // Check if we need to migrate local data
-                    const localData = localStorage.getItem('study_budy_data');
-                    if (localData) {
-                        try {
-                            const parsed = JSON.parse(localData);
-                            if ((parsed.classes?.length > 0) || (parsed.points > 0)) {
-                                await migrateGuestData(currentUser.id, parsed);
-                            }
-                        } catch (e) {
-                            console.error('Migration parse error', e);
-                        }
-                        localStorage.removeItem('study_budy_data'); // Clear after attempt
-                    }
-                    await loadRemoteData(currentUser.id);
-                } else {
-                    console.log('[AppContext] Skipping redundant data fetch for same user.');
+        const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+            if (event === 'SIGNED_IN' && session) {
+                setUser(session.user);
+                if (lastFetchedUserId.current !== session.user.id) {
+                    lastFetchedUserId.current = session.user.id;
+                    setIsLoading(true); // Show loading while fetching
+                    await loadRemoteData(session.user.id);
+                    setIsLoading(false);
                 }
             } else if (event === 'SIGNED_OUT') {
-                // Logged out - Explicitly clear
-                console.log('[AppContext] SIGNED_OUT event detected. Wiping state.');
+                setUser(null);
                 lastFetchedUserId.current = null;
-                setState(initialState);
-            } else {
-                console.log(`[AppContext] Auth event ${event} with no user. Not wiping state to be safe.`);
+                loadLocalData(); // Fallback to local
+                setIsLoading(false);
             }
         });
 
-        return () => subscription.unsubscribe();
+        init();
+
+        return () => {
+            authListener.subscription.unsubscribe();
+        };
     }, []);
+
+
+
 
     // 2. Loaders
     const loadLocalData = () => {
@@ -338,8 +340,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         // We know we haven't returned, so we are here. 
         // If isLoading was set to false by cache, don't set it to true again (prevents flashing).
         // Check current loading state? setState is async. 
-        // Let's use a flag logic or just rely on the fact that if we set it false above, we shouldn't set it true.
-        // Actually, 'setIsLoading' might batches. 
         // Safer: If we didn't hit cache return, we proceed. 
         // If we displayed cache, we don't want spinner. 
         // But we didn't track that locally in a var.
@@ -443,7 +443,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                     classId: s.class_id,
                     durationMinutes: s.duration_minutes,
                     pointsEarned: s.points_earned,
-                    timestamp: new Date(s.created_at).getTime()
+                    timestamp: new Date(s.created_at).getTime(),
+                    notes: s.notes // Map notes field
                 })) || [],
                 points: (profile as any)?.points || 0,
                 inventory: (profile as any)?.inventory || [],
@@ -454,11 +455,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 zenMode: (profile as any)?.zen_mode || initialState.zenMode,
                 isPremium: (profile as any)?.is_premium || false,
                 breakTimer: initialState.breakTimer,
+                gameTimeBank: (profile as any)?.game_time_bank || 0, // Load from DB
+                game4096: null,
                 activeSession: null,
                 highScores: {},
                 role: (profile as any)?.role || 'student',
-                isRoleSet: !!((profile as any)?.role), // True if role exists in DB
-                linkedUserId: (profile as any)?.linked_user_id
+                isRoleSet: !!((profile as any)?.role),
+                linkedUserId: (profile as any)?.linked_user_id || undefined,
+                notificationTier: (profile as any)?.notification_tier || 'summary',
+                characterCredits: {
+                    legendary: (profile as any)?.tier_legendary_credits || 0,
+                    epic: (profile as any)?.tier_epic_credits || 0,
+                    rare: (profile as any)?.tier_rare_credits || 0
+                }
             };
 
             // Restore activeSession from local storage explicitly if we are overwriting state
@@ -527,7 +536,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             inventory: localState.inventory,
             equipped_avatar: localState.equippedAvatar,
             sleep_settings: localState.sleepSettings,
-            is_onboarded: localState.isOnboarded
+            is_onboarded: localState.isOnboarded,
+            game_time_bank: localState.gameTimeBank // Migrate bank
         });
 
         // Insert Classes
@@ -569,7 +579,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 class_id: s.classId,
                 duration_minutes: s.durationMinutes,
                 points_earned: s.pointsEarned,
-                created_at: new Date(s.timestamp).toISOString()
+                created_at: new Date(s.timestamp).toISOString(),
+                notes: s.notes // Include notes in migration
             }));
             await supabase.from('study_sessions').upsert(sessionsToInsert);
         }
@@ -789,30 +800,32 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
 
     const recordSession = async (session: StudySession) => {
-        // Updates sessions AND points
+        console.log('[AppContext] recordSession called:', session);
+
+        // NOTE: Game time accrual removed - earned time is now use-it-or-lose-it
+        // Only gifted time persists in gameTimeBank
+
+        // Updates sessions and points (NO gameTimeBank update)
         setState(prev => ({
             ...prev,
             studySessions: [...prev.studySessions, session],
-            points: prev.points + session.pointsEarned,
+            points: prev.points + session.pointsEarned
         }));
 
         if (user) {
             await supabase.from('study_sessions').insert({
                 id: session.id, user_id: user.id, class_id: session.classId, duration_minutes: session.durationMinutes,
-                points_earned: session.pointsEarned, created_at: new Date(session.timestamp).toISOString()
-            }).then(() => {
-                // Trigger in DB increments points via function? Or we update manually.
-                // Let's update profile points manually for now.
-                // Need to fetch current points first or increment? Supabase assumes overwrite unless using rpc.
-                // Better to read state.points (optimistic) and set it.
-                // Danger: Race condition. RPC is better: `increment_points`.
-                // For MVP, just updating profile with new total is okay if single user session.
-            }).then(() => {
-                // Return the update promise to chain correctly
-                return supabase.from('profiles').update({ points: state.points + session.pointsEarned }).eq('id', user.id);
-            }).then((res) => {
-                if (res && res.error) console.error(res.error);
+                points_earned: session.pointsEarned, created_at: new Date(session.timestamp).toISOString(),
+                notes: session.notes
             });
+
+            // Update Profile Points only (no game_time_bank)
+            const { data: currentProfile } = await supabase.from('profiles').select('points').eq('id', user.id).single();
+            const currentPoints = currentProfile?.points || 0;
+
+            await supabase.from('profiles').update({
+                points: currentPoints + session.pointsEarned
+            }).eq('id', user.id);
         }
     };
 
@@ -847,6 +860,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
     };
 
+    const consumeGameTime = async (minutes: number) => {
+        // Don't allow negative values
+        if (state.gameTimeBank < minutes) {
+            console.warn('[AppContext] Attempted to consume more game time than available');
+            return;
+        }
+
+        // Update local state
+        setState(prev => ({ ...prev, gameTimeBank: Math.max(0, prev.gameTimeBank - minutes) }));
+
+        // Persist to database
+        if (user) {
+            const { data: profile } = await supabase.from('profiles').select('game_time_bank').eq('id', user.id).single();
+            if (profile) {
+                const newBank = Math.max(0, profile.game_time_bank - minutes);
+                await supabase.from('profiles').update({ game_time_bank: newBank }).eq('id', user.id);
+            }
+        }
+    };
+
     const buyItem = async (itemName: string, cost: number) => {
         // Optimistic UI
         const newPoints = Math.max(0, state.points - cost);
@@ -868,6 +901,40 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 // Revert state (fetch fresh)
                 await refreshData();
                 alert('Transaction Rejected: Insufficient Server-Side Funds. Stop hacking! 😉');
+            }
+        }
+    };
+
+    const redeemCharacterCredit = async (tier: 'legendary' | 'epic' | 'rare', itemName: string) => {
+        const currentCredits = state.characterCredits[tier];
+        if (currentCredits <= 0) {
+            console.error('[AppContext] No credits to redeem');
+            return;
+        }
+
+        const newCredits = { ...state.characterCredits, [tier]: currentCredits - 1 };
+        const newInventory = [...(state.inventory || []), itemName];
+
+        setState(prev => ({
+            ...prev,
+            characterCredits: newCredits,
+            inventory: newInventory,
+            equippedAvatar: itemName
+        }));
+
+        if (user) {
+            const updates: any = {
+                inventory: newInventory,
+                equipped_avatar: itemName
+            };
+            if (tier === 'legendary') updates.tier_legendary_credits = newCredits.legendary;
+            if (tier === 'epic') updates.tier_epic_credits = newCredits.epic;
+            if (tier === 'rare') updates.tier_rare_credits = newCredits.rare;
+
+            const { error } = await supabase.from('profiles').update(updates).eq('id', user.id);
+            if (error) {
+                console.error('[AppContext] Error redeeming credit:', error);
+                await refreshData();
             }
         }
     };
@@ -1248,6 +1315,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 addPoints,
                 removePoints,
                 buyItem,
+                redeemCharacterCredit,
                 equipAvatar,
                 completeOnboarding,
                 updateSettings,
@@ -1304,6 +1372,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                         return prev;
                     });
                 },
+                consumeGameTime,
                 submitGameScore: async (gameId: string, score: number): Promise<number | null> => {
                     // Submit score to Supabase for global leaderboard
                     if (!user) return null;
@@ -1359,12 +1428,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                         let totalCoins = 0;
                         let totalGameMinutes = 0;
                         let senderName = '';
+                        let legendaryCount = 0;
+                        let epicCount = 0;
+                        let rareCount = 0;
 
                         for (const gift of gifts) {
                             if (gift.gift_type === 'coins') {
                                 totalCoins += gift.amount;
                             } else if (gift.gift_type === 'game_time') {
                                 totalGameMinutes += gift.amount;
+                            } else if (gift.gift_type === 'character_legendary') {
+                                legendaryCount += 1;
+                            } else if (gift.gift_type === 'character_epic') {
+                                epicCount += 1;
+                            } else if (gift.gift_type === 'character_rare') {
+                                rareCount += 1;
                             }
                             if (!senderName && gift.sender_name) {
                                 senderName = gift.sender_name;
@@ -1391,9 +1469,49 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                             }
                         }
 
-                        // Game minutes are handled separately (could extend break timer or store for later)
+                        // Update Credits
+                        if (legendaryCount > 0 || epicCount > 0 || rareCount > 0) {
+                            const newCredits = {
+                                legendary: state.characterCredits.legendary + legendaryCount,
+                                epic: state.characterCredits.epic + epicCount,
+                                rare: state.characterCredits.rare + rareCount
+                            };
 
-                        return { coins: totalCoins, gameMinutes: totalGameMinutes, senderName };
+                            setState(prev => ({ ...prev, characterCredits: newCredits }));
+
+                            if (user) {
+                                // For credits, we should increment the DB values.
+                                // We can use the new state values since we just fetched profile on refresh.
+                                await supabase.from('profiles').update({
+                                    tier_legendary_credits: newCredits.legendary,
+                                    tier_epic_credits: newCredits.epic,
+                                    tier_rare_credits: newCredits.rare
+                                }).eq('id', user.id);
+                            }
+                        }
+
+                        // Add game time to bank if any
+                        if (totalGameMinutes > 0) {
+                            const newGameTimeBank = state.gameTimeBank + totalGameMinutes;
+                            setState(prev => ({ ...prev, gameTimeBank: newGameTimeBank }));
+
+                            if (user) {
+                                await supabase.from('profiles').update({
+                                    game_time_bank: newGameTimeBank
+                                }).eq('id', user.id);
+                            }
+                        }
+
+                        return {
+                            coins: totalCoins,
+                            gameMinutes: totalGameMinutes,
+                            senderName,
+                            giftCredits: {
+                                legendary: legendaryCount,
+                                epic: epicCount,
+                                rare: rareCount
+                            }
+                        };
                     } catch (err) {
                         console.error('Error claiming gifts:', err);
                         return null;
