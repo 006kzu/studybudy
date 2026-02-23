@@ -2,7 +2,8 @@
 
 import Modal from './Modal';
 import { useApp } from '@/context/AppContext';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { supabase } from '@/lib/supabase';
 
 interface ShareProgressModalProps {
     isOpen: boolean;
@@ -27,6 +28,37 @@ export default function ShareProgressModal({
 }: ShareProgressModalProps) {
     const { user } = useApp();
     const [hasShared, setHasShared] = useState(false);
+    const [shareUrl, setShareUrl] = useState('');
+
+    // Check for linked parent on mount/open
+    useEffect(() => {
+        if (isOpen && user) {
+            const checkLink = async () => {
+                // Default web link
+                let finalUrl = `https://learnloop.app/invite?id=${user.id}`;
+
+                try {
+                    // Check if any parent account is linked to this student
+                    // The parent's profile has linked_user_id = student.id
+                    const { data } = await supabase
+                        .from('profiles')
+                        .select('id')
+                        .eq('linked_user_id', user.id)
+                        .limit(1);
+
+                    if (data && data.length > 0) {
+                        // Parent found! Use Deep Link
+                        console.log('[Share] Parent detected, using Deep Link');
+                        finalUrl = `loopy-learn://progress?studentId=${user.id}`;
+                    }
+                } catch (e) {
+                    console.warn('[Share] Error checking parent link:', e);
+                }
+                setShareUrl(finalUrl);
+            };
+            checkLink();
+        }
+    }, [isOpen, user]);
 
     const handleShare = () => {
         // Create the achievement message
@@ -34,19 +66,17 @@ export default function ShareProgressModal({
             ? `🎉 I completed ALL my study goals this week on Learn Loop! 📚✨`
             : `🎉 I hit my ${className} study goal! Studied ${Math.round(minutesStudied)} mins this week! 📚✨`;
 
-        const downloadLink = `https://learnloop.app/invite?id=${user?.id || ''}`;
-
-        const fullMessage = `${achievementText}\nDownload Learn Loop to see my hard work!\n${downloadLink}`;
+        const fullMessage = `${achievementText}\nDownload Learn Loop to see my hard work!`;
 
         if (navigator.share) {
             navigator.share({
                 title: 'Study Progress',
                 text: fullMessage,
-                url: downloadLink
+                url: shareUrl || `https://learnloop.app/invite?id=${user?.id || ''}`
             }).catch(console.error);
         } else {
             // Open SMS with pre-filled message as fallback
-            const smsUrl = `sms:&body=${encodeURIComponent(fullMessage)}`;
+            const smsUrl = `sms:&body=${encodeURIComponent(fullMessage + '\n' + shareUrl)}`;
             window.location.href = smsUrl;
         }
 

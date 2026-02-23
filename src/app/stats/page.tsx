@@ -2,272 +2,283 @@
 
 import { useApp } from '@/context/AppContext';
 import Link from 'next/link';
-import { useState, useMemo } from 'react';
-import WienerAvatar from '@/components/WienerAvatar';
+import { useState, useEffect } from 'react';
 
 export default function StatsPage() {
     const { state } = useApp();
+    const [loading, setLoading] = useState(true);
 
-    // -- Metrics Calculation --
-    // -- Metrics Calculation --
-    const [timeRange, setTimeRange] = useState<'week' | 'month' | 'year' | 'all'>('week');
-
-    const filteredSessions = useMemo(() => {
+    // Calculate start of week (Monday)
+    const getStartOfWeek = () => {
         const now = new Date();
-        return state.studySessions.filter(session => {
-            const sessionDate = new Date(session.timestamp); // Timestamp is simpler
-            if (timeRange === 'all') return true;
+        const day = now.getDay();
+        const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+        const monday = new Date(now.setDate(diff));
+        monday.setHours(0, 0, 0, 0);
+        return monday.getTime();
+    };
 
-            const diffTime = Math.abs(now.getTime() - sessionDate.getTime());
-            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const startOfWeek = getStartOfWeek();
 
-            if (timeRange === 'week') return diffDays <= 7;
-            if (timeRange === 'month') return diffDays <= 30;
-            if (timeRange === 'year') return diffDays <= 365;
-            return true;
-        });
-    }, [state.studySessions, timeRange]);
+    // Stats Calculation
+    const sessions = state.studySessions || [];
+    const classes = state.classes || [];
 
-    const totalMinutes = useMemo(() => {
-        return filteredSessions.reduce((acc, curr) => acc + curr.durationMinutes, 0);
-    }, [filteredSessions]);
+    const totalStudyTimeMinutes = sessions.reduce((acc, s) => acc + s.durationMinutes, 0);
+    const weeklyStudyMinutes = sessions
+        .filter(s => s.timestamp >= startOfWeek)
+        .reduce((acc, s) => acc + s.durationMinutes, 0);
 
-    const totalHours = (totalMinutes / 60).toFixed(1);
+    const totalWeeklyGoal = classes.reduce((acc, c) => acc + c.weeklyGoalMinutes, 0);
+    const weeklyPercent = totalWeeklyGoal > 0 ? Math.min(100, (weeklyStudyMinutes / totalWeeklyGoal) * 100) : 0;
 
-    const classStats = useMemo(() => {
-        const stats: Record<string, number> = {};
+    // Sessions per class
+    const classStats = classes.map(cls => {
+        const classSessions = sessions.filter(s => s.classId === cls.id);
+        const classMinutes = classSessions.reduce((acc, s) => acc + s.durationMinutes, 0);
+        const weeklyClassMinutes = classSessions
+            .filter(s => s.timestamp >= startOfWeek)
+            .reduce((acc, s) => acc + s.durationMinutes, 0);
+        return {
+            ...cls,
+            totalMinutes: classMinutes,
+            weeklyMinutes: weeklyClassMinutes,
+            sessionCount: classSessions.length
+        };
+    }).sort((a, b) => b.totalMinutes - a.totalMinutes);
 
-        // Initialize with 0 for all active classes
-        state.classes.forEach(c => {
-            stats[c.id] = 0;
-        });
+    // Recent Activity (Top 10)
+    const recentActivity = [...sessions]
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .slice(0, 10);
 
-        // Sum up sessions
-        filteredSessions.forEach(s => {
-            stats[s.classId] = (stats[s.classId] || 0) + s.durationMinutes;
-        });
+    useEffect(() => {
+        // Mock loading delay for smooth transition
+        const timer = setTimeout(() => setLoading(false), 300);
+        return () => clearTimeout(timer);
+    }, []);
 
-        // Convert to array for display
-        return Object.entries(stats)
-            .map(([classId, minutes]) => {
-                const cls = state.classes.find(c => c.id === classId);
-                return {
-                    classId,
-                    minutes,
-                    className: cls?.name || 'Unknown Class',
-                    color: cls?.color || '#ccc'
-                };
-            })
-            // Filter out classes with 0 minutes if you want clean chart, or keep them to show what is neglected.
-            // Keeping them is good for "what to study next".
-            .filter(item => {
-                const cls = state.classes.find(c => c.id === item.classId);
-
-                // Filter out unknown classes
-                if (!cls) return false;
-
-                // Should we hide archived classes if they have 0 minutes? Yes.
-                if (cls.isArchived && item.minutes === 0) return false;
-                return true;
-            })
-            .sort((a, b) => b.minutes - a.minutes); // Sort by most studied
-    }, [filteredSessions, state.classes]);
-
-    // -- Achievements Logic --
-    // Simple milestones for now
-    const achievements = [
-        // Easy / Starter
-        { id: 'first_step', title: 'First Step', desc: 'Study for 15 minutes', thresholdMin: 15, iconSrc: '/icons/icon_achievements_first_step.png' },
-        { id: 'scholar', title: 'Scholar', desc: 'Study for 10 hours', thresholdMin: 600, iconSrc: '/icons/icon_achievements_scholar.png' },
-
-        // Hours Milestones
-        { id: 'dedicated', title: 'Dedicated', desc: 'Study for 50 hours', thresholdMin: 3000, iconSrc: '/icons/icon_achievements_dedicated.png' },
-        { id: 'master', title: 'Master', desc: 'Study for 100 hours', thresholdMin: 6000, iconSrc: '/icons/icon_achievements_master.png' },
-        { id: 'obsessed', title: 'Obsessed', desc: 'Study for 200 hours', thresholdMin: 12000, iconSrc: '/icons/icon_achievements_obsessed.png' },
-        { id: 'einstein', title: 'Einstein', desc: 'Study for 500 hours', thresholdMin: 30000, iconSrc: '/icons/icon_achievements_einstein.png' },
-        { id: 'time_lord', title: 'Time Lord', desc: 'Study for 1000 hours', thresholdMin: 60000, iconSrc: '/icons/icon_achievements_time_lord.png' },
-
-        // Wealth Milestones
-        { id: 'rich', title: 'Rich Dog', desc: 'Earn 1000 Coins', thresholdCoins: 1000, iconSrc: '/icons/icon_achievements_rich_dog.png' },
-        { id: 'hoarder', title: 'Coin Hoarder', desc: 'Earn 2,500 Coins', thresholdCoins: 2500, iconSrc: '/icons/icon_achievements_coin_hoarder.png' },
-        { id: 'tycoon', title: 'Tycoon', desc: 'Earn 5,000 Coins', thresholdCoins: 5000, iconSrc: '/icons/icon_achievements_tycoon.png' },
-
-        // Collection Milestones
-        { id: 'collector', title: 'Collector', desc: 'Own 3 Avatars', thresholdItems: 3, iconSrc: '/icons/icon_achievements_collector.png' },
-        { id: 'fashionista', title: 'Fashionista', desc: 'Own 5 Avatars', thresholdItems: 5, iconSrc: '/icons/icon_achievements_fashionista.png' },
-        { id: 'menagerie', title: 'The Menagerie', desc: 'Own 10 Avatars', thresholdItems: 10, iconSrc: '/icons/icon_achievements_menagerie.png' },
-
-        // Special Stats
-        { id: 'jack', title: 'Jack of All Trades', desc: 'Study 5 different classes for 1+ hour each', special: 'jack', iconSrc: '/icons/icon_achievements_jack_of_all_trades.png' },
-        { id: 'specialist', title: 'Specialist', desc: 'Study a single class for 50+ hours', special: 'specialist', iconSrc: '/icons/icon_achievements_specialist.png' },
-    ];
+    if (loading) {
+        return (
+            <div className="container" style={{
+                height: '100vh',
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center'
+            }}>
+                <div style={{
+                    width: '40px',
+                    height: '40px',
+                    border: '4px solid #CBE4DE',
+                    borderTop: '4px solid #0E8388',
+                    borderRadius: '50%',
+                    animation: 'spin 1s linear infinite'
+                }} />
+                <style jsx>{`
+                    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+                `}</style>
+            </div>
+        );
+    }
 
     return (
-        <main className="container" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 16px)' }}>
-            <div style={{ marginBottom: '16px' }}>
-                <Link href="/dashboard" style={{ textDecoration: 'none', color: 'var(--color-text-secondary)', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    ← Back to Dashboard
+        <main className="container" style={{
+            paddingTop: 'calc(env(safe-area-inset-top) + 20px)',
+            paddingBottom: '40px',
+            minHeight: '100vh'
+        }}>
+            {/* Header */}
+            <header style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: '24px'
+            }}>
+                <Link href="/dashboard" style={{ textDecoration: 'none' }}>
+                    <div style={{
+                        background: 'rgba(255,255,255,0.8)',
+                        padding: '8px 16px',
+                        borderRadius: '12px',
+                        fontWeight: 700,
+                        color: '#2C3333',
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
+                        fontSize: '0.9rem'
+                    }}>
+                        ← Back
+                    </div>
                 </Link>
-            </div>
-
-            <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' }}>
-                <div>
-                    <h1 className="text-h1">Statistics</h1>
-                    <p className="text-body" style={{ opacity: 0.7 }}>Your academic journey</p>
+                <div style={{
+                    background: '#CBE4DE',
+                    color: '#2C3333',
+                    padding: '8px 16px',
+                    borderRadius: '20px',
+                    fontWeight: 800,
+                    fontSize: '1.2rem',
+                    boxShadow: '0 4px 12px rgba(14, 131, 136, 0.15)'
+                }}>
+                    My Stats 📊
                 </div>
-                <WienerAvatar points={state.points} inventory={state.inventory} equippedAvatar={state.equippedAvatar} />
+                <div style={{ width: '60px' }}></div> {/* Spacer for balance */}
             </header>
 
-            {/* Overview Cards */}
-            <section style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '32px' }}>
-                <div className="card text-center">
-                    <div style={{ marginBottom: '8px' }}>
-                        <img src="/icons/clock.png" alt="Time" style={{ width: '80px', height: '80px' }} />
-                    </div>
-                    <div className="text-h2">{totalHours}</div>
-                    <div className="text-body" style={{ fontSize: '0.8rem', opacity: 0.7 }}>Total Study Hours</div>
-                </div>
-                <div className="card text-center">
-                    <div style={{ marginBottom: '8px' }}>
-                        <img src="/icons/coins.png" alt="Coins" style={{ width: '80px', height: '80px' }} />
-                    </div>
-                    <div className="text-h2">{state.points}</div>
-                    <div className="text-body" style={{ fontSize: '0.8rem', opacity: 0.7 }}>Lifetime Coins</div>
-                </div>
-            </section>
-
-            {/* Class Breakdown with Filters */}
-            <section style={{ marginBottom: '32px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                    <h2 className="text-h2">Subject Breakdown</h2>
-                    {/* Time Range Filter */}
-                    <div style={{ display: 'flex', background: '#f0f0f0', borderRadius: '8px', padding: '2px' }}>
-                        {(['week', 'month', 'year', 'all'] as const).map((range) => (
-                            <button
-                                key={range}
-                                onClick={() => setTimeRange(range)}
-                                style={{
-                                    border: 'none',
-                                    background: timeRange === range ? 'white' : 'transparent',
-                                    boxShadow: timeRange === range ? '0 2px 4px rgba(0,0,0,0.1)' : 'none',
-                                    padding: '4px 12px',
-                                    borderRadius: '6px',
-                                    fontSize: '0.8rem',
-                                    cursor: 'pointer',
-                                    fontWeight: timeRange === range ? 600 : 400,
-                                    color: timeRange === range ? 'var(--color-primary)' : '#666',
-                                    textTransform: 'capitalize'
-                                }}
-                            >
-                                {range}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-
-                {classStats.length === 0 ? (
-                    <div className="card text-center" style={{ padding: '32px' }}>
-                        <p className="text-body" style={{ opacity: 0.6 }}>No study sessions found for this period.</p>
-                    </div>
-                ) : (
-                    <div className="card">
-                        {/* Bar Graph */}
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                            {classStats.map(item => {
-                                const maxMinutes = Math.max(...classStats.map(c => c.minutes));
-                                // Minimum width for visibility if > 0
-                                const widthPercent = maxMinutes > 0 ? (item.minutes / maxMinutes) * 100 : 0;
-
-                                return (
-                                    <div key={item.classId} style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                        {/* Label with Color Indicator */}
-                                        <div style={{ width: '120px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }}>
-                                            <div style={{
-                                                width: '8px',
-                                                height: '8px',
-                                                borderRadius: '50%',
-                                                background: item.color,
-                                                flexShrink: 0
-                                            }} />
-                                            <div style={{
-                                                fontSize: '0.85rem',
-                                                fontWeight: 600,
-                                                whiteSpace: 'nowrap',
-                                                overflow: 'hidden',
-                                                textOverflow: 'ellipsis',
-                                                textAlign: 'right',
-                                                direction: 'rtl', // Ensure truncation happens on the left side if needed
-                                            }}>
-                                                {item.className}
-                                            </div>
-                                        </div>
-
-                                        {/* Bar Area */}
-                                        <div style={{ flex: 1, height: '24px', background: '#f5f5f5', borderRadius: '4px', overflow: 'hidden', position: 'relative' }}>
-                                            <div style={{
-                                                width: `${widthPercent}%`,
-                                                height: '100%',
-                                                background: item.color,
-                                                borderRadius: '4px',
-                                                transition: 'width 0.5s ease-out',
-                                                minWidth: item.minutes > 0 ? '4px' : '0' // Ensure visible if > 0
-                                            }} />
-                                        </div>
-
-                                        {/* Value Label */}
-                                        <div style={{ width: '60px', fontSize: '0.8rem', color: '#666' }}>
-                                            {(item.minutes / 60).toFixed(1)} hrs
-                                        </div>
-                                    </div>
-                                );
-                            })}
+            {/* Weekly Progress Card */}
+            <section style={{ marginBottom: '24px' }}>
+                <div className="card" style={{
+                    background: '#CBE4DE',
+                    color: '#2C3333',
+                    border: '1px solid rgba(14, 131, 136, 0.2)',
+                    boxShadow: '0 8px 32px rgba(14, 131, 136, 0.1)'
+                }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '16px' }}>
+                        <div>
+                            <h2 style={{ fontSize: '1.2rem', margin: 0, fontWeight: 800, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                Weekly Focus <img src="/icons/focus.png" alt="Focus" style={{ width: '32px', height: '32px' }} />
+                            </h2>
+                            <p style={{ fontSize: '0.9rem', margin: '4px 0 0', opacity: 0.7 }}>Total Study Time</p>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                            <span style={{ fontSize: '2rem', fontWeight: 800 }}>{Math.round(weeklyStudyMinutes)}</span>
+                            <span style={{ fontSize: '1rem', opacity: 0.7 }}> / {totalWeeklyGoal}m</span>
                         </div>
                     </div>
-                )}
+
+                    <div style={{
+                        width: '100%',
+                        height: '20px',
+                        background: 'rgba(44, 51, 51, 0.1)',
+                        borderRadius: 'var(--radius-full)',
+                        overflow: 'hidden'
+                    }}>
+                        <div style={{
+                            width: `${weeklyPercent}%`,
+                            height: '100%',
+                            background: '#2C3333',
+                            borderRadius: 'var(--radius-full)',
+                            transition: 'width 1s ease-out'
+                        }} />
+                    </div>
+
+                    {weeklyPercent >= 100 && (
+                        <div style={{ marginTop: '12px', textAlign: 'center', fontWeight: 700, fontSize: '0.9rem' }}>
+                            🎉 Goal Crushed! Amazing work!
+                        </div>
+                    )}
+                </div>
             </section>
 
-            {/* Achievements */}
-            <section>
-                <h2 className="text-h2" style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <img src="/icons/achievements.png" alt="Achievements" style={{ width: '56px', height: '56px' }} />
-                    Achievements
-                </h2>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '16px' }}>
-                    {achievements.map(ach => {
-                        let isUnlocked = false;
-                        if (ach.thresholdMin && totalMinutes >= ach.thresholdMin) isUnlocked = true;
-                        if (ach.thresholdCoins && state.points >= ach.thresholdCoins) isUnlocked = true;
-                        if (ach.thresholdItems && state.inventory.length >= ach.thresholdItems) isUnlocked = true;
+            {/* Quick Stats Grid */}
+            <section style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '24px' }}>
+                <div className="card" style={{ textAlign: 'center', padding: '16px', background: '#fff', border: '1px solid #eee' }}>
+                    <div style={{ fontSize: '0.8rem', opacity: 0.7, marginBottom: '4px' }}>Total Hours</div>
+                    <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#f97316' }}>
+                        {Math.round(totalStudyTimeMinutes / 60)}h
+                    </div>
+                </div>
+                <div className="card" style={{ textAlign: 'center', padding: '16px', background: '#fff', border: '1px solid #eee' }}>
+                    <div style={{ fontSize: '0.8rem', opacity: 0.7, marginBottom: '4px' }}>Sessions</div>
+                    <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#0ea5e9' }}>
+                        {sessions.length}
+                    </div>
+                </div>
+                <div className="card" style={{ textAlign: 'center', padding: '16px', background: '#fff', border: '1px solid #eee' }}>
+                    <div style={{ fontSize: '0.8rem', opacity: 0.7, marginBottom: '4px' }}>Avg Time</div>
+                    <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#8b5cf6' }}>
+                        {sessions.length > 0 ? Math.round(totalStudyTimeMinutes / sessions.length) : 0}m
+                    </div>
+                </div>
+            </section>
 
-                        // Special Logic
-                        if (ach.special === 'jack') {
-                            if (classStats.filter(c => c.minutes >= 60).length >= 5) isUnlocked = true;
-                        }
-                        if (ach.special === 'specialist') {
-                            if (classStats.some(c => c.minutes >= 3000)) isUnlocked = true; // 50 hours
-                        }
-
-                        return (
-                            <div
-                                key={ach.id}
-                                className="card text-center"
-                                style={{
-                                    opacity: isUnlocked ? 1 : 0.5,
-                                    filter: isUnlocked ? 'none' : 'grayscale(100%)',
-                                    background: isUnlocked ? 'white' : '#f9f9f9',
-                                    transition: 'all 0.2s',
-                                    border: isUnlocked ? '2px solid var(--color-primary)' : '1px solid #eee'
-                                }}
-                            >
-                                <div style={{ fontSize: '2rem', marginBottom: '8px', display: 'flex', justifyContent: 'center' }}>
-                                    <img src={ach.iconSrc} alt={ach.title} style={{ width: '72px', height: '72px' }} />
+            {/* Class Breakdown */}
+            <section style={{ marginBottom: '24px' }}>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '12px', color: '#2C3333' }}>Class Breakdown</h3>
+                <div style={{ display: 'grid', gap: '12px' }}>
+                    {classStats.map(cls => (
+                        <div key={cls.id} className="card" style={{
+                            padding: '16px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            borderLeft: `6px solid ${cls.color}`,
+                            background: '#fff'
+                        }}>
+                            <div style={{ flex: 1 }}>
+                                <div style={{ fontWeight: 700, fontSize: '1.1rem' }}>{cls.name}</div>
+                                <div style={{ fontSize: '0.8rem', opacity: 0.6 }}>
+                                    {cls.sessionCount} sessions • {cls.weeklyGoalMinutes}m goal/week
                                 </div>
-                                <h3 style={{ fontWeight: 700, fontSize: '0.9rem', marginBottom: '4px' }}>{ach.title}</h3>
-                                <p style={{ fontSize: '0.7rem', color: isUnlocked ? 'var(--color-text-secondary)' : '#999' }}>{ach.desc}</p>
-                                {!isUnlocked && <div style={{ fontSize: '0.7rem', marginTop: '8px', color: '#999' }}>🔒 Locked</div>}
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                                <div style={{ fontWeight: 800, fontSize: '1.2rem', color: '#2C3333' }}>{Math.round(cls.totalMinutes)}m</div>
+                                <div style={{ fontSize: '0.7rem', opacity: 0.6 }}>Total</div>
+                            </div>
+                        </div>
+                    ))}
+                    {classStats.length === 0 && (
+                        <div style={{ textAlign: 'center', padding: '32px', opacity: 0.6 }}>No subjects added yet.</div>
+                    )}
+                </div>
+            </section>
+
+            {/* Recent Activity */}
+            <section>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '12px', color: '#2C3333' }}>Recent Activity</h3>
+                <div style={{ display: 'grid', gap: '12px' }}>
+                    {recentActivity.map((session, idx) => {
+                        const cls = classes.find(c => c.id === session.classId);
+                        return (
+                            <div key={session.id || idx} style={{
+                                background: '#fff',
+                                padding: '12px 16px',
+                                borderRadius: '16px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '12px',
+                                border: '1px solid #f0f0f0'
+                            }}>
+                                <div style={{
+                                    width: '40px',
+                                    height: '40px',
+                                    borderRadius: '50%',
+                                    background: cls?.color || '#eee',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    fontWeight: 700,
+                                    fontSize: '1rem',
+                                    color: '#fff',
+                                    flexShrink: 0
+                                }}>
+                                    {cls?.name.substring(0, 1) || '?'}
+                                </div>
+                                <div style={{ flex: 1 }}>
+                                    <div style={{ fontWeight: 600, color: '#2C3333' }}>
+                                        {cls?.name || 'Unknown Class'}
+                                    </div>
+                                    <div style={{ fontSize: '0.8rem', opacity: 0.6 }}>
+                                        {new Date(session.timestamp).toLocaleDateString()} • {new Date(session.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </div>
+                                    {session.notes && (
+                                        <div style={{
+                                            marginTop: '4px',
+                                            fontSize: '0.85rem',
+                                            background: '#f8f9fa',
+                                            padding: '4px 8px',
+                                            borderRadius: '6px',
+                                            fontStyle: 'italic',
+                                            color: '#666'
+                                        }}>
+                                            "{session.notes}"
+                                        </div>
+                                    )}
+                                </div>
+                                <div style={{ fontWeight: 700, color: '#2C3333' }}>
+                                    {session.durationMinutes}m
+                                </div>
                             </div>
                         );
                     })}
+                    {recentActivity.length === 0 && (
+                        <div style={{ textAlign: 'center', padding: '32px', opacity: 0.6 }}>No study sessions yet.</div>
+                    )}
                 </div>
             </section>
         </main>

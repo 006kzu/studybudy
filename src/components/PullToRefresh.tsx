@@ -77,10 +77,10 @@ export default function PullToRefresh({ onRefresh, children }: PullToRefreshProp
                 right: 0,
                 height: `${currentY}px`,
                 display: 'flex',
-                alignItems: 'center',
+                alignItems: 'flex-end',
                 justifyContent: 'center',
-                overflow: 'hidden',
-                zIndex: 1000,
+                paddingBottom: '8px',
+                zIndex: 50,
                 pointerEvents: 'none', // Allow clicks through
                 transition: refreshing ? 'height 0.2s ease' : 'none' // Don't animate during drag
             }}>
@@ -93,18 +93,19 @@ export default function PullToRefresh({ onRefresh, children }: PullToRefreshProp
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    transform: `translateY(${Math.min(currentY - 40, 60)}px) rotate(${refreshing ? 0 : rotation}deg)`,
-                    transition: 'transform 0.2s'
+                    opacity: currentY > 10 ? 1 : 0,
+                    transition: 'opacity 0.2s'
                 }}>
                     {refreshing ? (
-                        <div className="animate-spin" style={{
-                            width: '16px', height: '16px',
-                            border: '2px solid var(--color-primary)',
-                            borderTopColor: 'transparent',
-                            borderRadius: '50%'
-                        }} />
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'ptr-spin 0.8s linear infinite' }}>
+                            <path d="M21 12a9 9 0 1 1-6.22-8.56" />
+                            <path d="M21 3v6h-6" />
+                        </svg>
                     ) : (
-                        <span style={{ color: 'var(--color-primary)', fontSize: '1rem' }}>⬇</span>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: `rotate(${rotation}deg)`, transition: 'transform 0.1s' }}>
+                            <path d="M21 12a9 9 0 1 1-6.22-8.56" />
+                            <path d="M21 3v6h-6" />
+                        </svg>
                     )}
                 </div>
             </div>
@@ -117,6 +118,13 @@ export default function PullToRefresh({ onRefresh, children }: PullToRefreshProp
             }}>
                 {children}
             </div>
+
+            <style jsx>{`
+                @keyframes ptr-spin {
+                    from { transform: rotate(0deg); }
+                    to { transform: rotate(360deg); }
+                }
+            `}</style>
         </div>
     );
 }

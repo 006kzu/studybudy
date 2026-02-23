@@ -52,7 +52,7 @@ export default function LoginPage() {
     const handleOAuth = async (provider: 'google' | 'apple') => {
         const isNative = Capacitor.isNativePlatform();
         const redirectTo = isNative
-            ? 'com.learnloop.learnloop://callback'
+            ? 'com.zachthomas.studybudy.learnloop://callback'
             : `${window.location.origin}/auth/callback?next=/dashboard`;
 
         console.log('OAuth Redirect URL:', redirectTo);

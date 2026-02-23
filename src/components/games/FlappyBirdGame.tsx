@@ -63,13 +63,14 @@ export default function FlappyBirdGame({ avatarSrc, onExit, timeLeft }: FlappyBi
         };
     }, [avatarSrc]);
 
-    const startGame = () => {
-        setGameState('PLAY');
+    const beginGame = () => {
+        // Reset game state for the upcoming round
         scoreVal.current = 0;
         birdY.current = window.innerHeight / 2;
         birdVelocity.current = 0;
         pipes.current = [];
         frameCount.current = 0;
+        setGameState('PLAY');
         loop();
     };
 
@@ -257,7 +258,7 @@ export default function FlappyBirdGame({ avatarSrc, onExit, timeLeft }: FlappyBi
                 // Do nothing, UI will show BreakEndedModal
                 return;
             }
-            startGame();
+            beginGame();
         }
     };
     // ...
@@ -323,6 +324,8 @@ export default function FlappyBirdGame({ avatarSrc, onExit, timeLeft }: FlappyBi
                 </div>
             )}
 
+
+
             {gameState === 'GAME_OVER' && (
                 state.gameTimeBank <= 0 ? (
                     <BreakEndedModal
@@ -336,6 +339,8 @@ export default function FlappyBirdGame({ avatarSrc, onExit, timeLeft }: FlappyBi
                     />
                 ) : (
                     <GameOverModal
+                        // @ts-ignore
+                        key={scoreVal.current}
                         score={scoreVal.current}
                         highScore={state.highScores['flappy-bird'] || 0}
                         isNewRecord={isNewRecord}
@@ -372,6 +377,11 @@ export default function FlappyBirdGame({ avatarSrc, onExit, timeLeft }: FlappyBi
 
             <style jsx>{`
                 @keyframes pulse { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
+                @keyframes countdownPop {
+                    0% { transform: scale(2); opacity: 0; }
+                    50% { transform: scale(1); opacity: 1; }
+                    100% { transform: scale(0.95); opacity: 1; }
+                }
             `}</style>
 
             {/* Leaderboard Placement Popup */}

@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.learnloop.learnloop',
+  appId: 'com.zachthomas.studybudy.learnloop',
   appName: 'Learn Loop',
   webDir: 'out',
   /* 

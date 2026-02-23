@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>CFBundleDisplayName</key>
 	<string>Learn Loop</string>
 	<key>CFBundleExecutable</key>
@@ -20,10 +22,10 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>com.studdybuddies.app</string>
+			<string>com.zachthomas.studybudy.learnloop</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>com.studdybuddies.app</string>
+				<string>com.zachthomas.studybudy.learnloop</string>
 			</array>
 		</dict>
 	</array>

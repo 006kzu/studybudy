@@ -1,12 +1,15 @@
 'use client';
 
 import { useApp } from '@/context/AppContext';
+import ParentalGate from '@/components/ParentalGate';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { purchaseItem } from '@/lib/iap';
 import Link from 'next/link';
 import Modal from '@/components/Modal';
+import { generateDailySummary } from '@/lib/ai-summary';
+import { AdMobService } from '@/lib/admob';
 
 interface StudySession {
     id: string;
@@ -25,7 +28,7 @@ interface ClassData {
 }
 
 export default function ParentDashboard() {
-    const { user, state, signOut } = useApp();
+    const { user, state, signOut, refreshData, deleteAccount } = useApp();
     const router = useRouter();
     const [childProfile, setChildProfile] = useState<any>(null);
     const [childClasses, setChildClasses] = useState<ClassData[]>([]);
@@ -34,10 +37,20 @@ export default function ParentDashboard() {
     const [loading, setLoading] = useState(true);
     const [purchasing, setPurchasing] = useState(false);
 
-    // Notification Tier State
-    const [notificationTier, setNotificationTier] = useState<'none' | 'summary' | 'all'>('summary');
+    // Notification Toggle State (on = summary, off = none)
+    const [summariesEnabled, setSummariesEnabled] = useState(true);
     const [showSettings, setShowSettings] = useState(false);
-    const notificationTierRef = useRef<'none' | 'summary' | 'all'>('summary'); // Ref for realtime callback
+    const summariesEnabledRef = useRef(true);
+
+    // AI Summary State
+    const [aiSummary, setAiSummary] = useState<string | null>(null);
+    const [aiSummaryLoading, setAiSummaryLoading] = useState(false);
+
+    // Feedback State
+    const [showFeedback, setShowFeedback] = useState(false);
+    const [feedbackText, setFeedbackText] = useState('');
+    const [feedbackSending, setFeedbackSending] = useState(false);
+    const [feedbackSent, setFeedbackSent] = useState(false);
 
     // Linking State
     const [linkId, setLinkId] = useState('');
@@ -60,20 +73,26 @@ export default function ParentDashboard() {
     const startOfWeek = getStartOfWeek();
 
     // Realtime Updates & Notifications
-    const [celebrateSession, setCelebrateSession] = useState<StudySession | null>(null);
+    const [celebrateSession, setCelebrateSession] = useState<any>(null);
+    const [showLinkSuccess, setShowLinkSuccess] = useState(false);
+    const [showDeleteModal, setShowDeleteModal] = useState(false);
+    const [showWhereIsId, setShowWhereIsId] = useState(false);
+    const [showFullHistory, setShowFullHistory] = useState(false);
+
 
     useEffect(() => {
-        notificationTierRef.current = notificationTier;
-    }, [notificationTier]);
+        // Hide any persisting banner ad from student dashboard
+        AdMobService.hideBanner();
 
-    useEffect(() => {
         const fetchChild = async () => {
             if (!user) return;
 
             // Fetch Parent's Profile for Notification Settings
             const { data: parentProfile } = await supabase.from('profiles').select('notification_tier').eq('id', user.id).single();
             if (parentProfile) {
-                setNotificationTier(parentProfile.notification_tier as any || 'summary');
+                const isOn = parentProfile.notification_tier !== 'none';
+                setSummariesEnabled(isOn);
+                summariesEnabledRef.current = isOn;
             }
 
             let linkedId = state.linkedUserId;
@@ -136,18 +155,62 @@ export default function ParentDashboard() {
         fetchChild();
     }, [user, state.linkedUserId, state.lastRefreshed]);
 
-    // Update Notification Setting
-    const updateNotificationTier = async (tier: 'none' | 'summary' | 'all') => {
-        setNotificationTier(tier);
+    // Update Notification Setting (toggle)
+    const toggleSummaries = async () => {
+        const newVal = !summariesEnabled;
+        setSummariesEnabled(newVal);
+        summariesEnabledRef.current = newVal;
         if (user) {
-            await supabase.from('profiles').update({ notification_tier: tier }).eq('id', user.id);
+            await supabase.from('profiles').update({ notification_tier: newVal ? 'summary' : 'none' }).eq('id', user.id);
         }
+    };
+
+    // Generate AI Summary on load
+    useEffect(() => {
+        if (!summariesEnabled || !childProfile || !childSessions.length || aiSummary) return;
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+        const todaySessions = childSessions.filter(s => s.timestamp >= todayStart.getTime());
+        if (todaySessions.length === 0) return;
+
+        setAiSummaryLoading(true);
+        const todayGifts = gifts.filter(g => new Date(g.created_at).getTime() >= todayStart.getTime()).length;
+        generateDailySummary({
+            studentName: childProfile.full_name || 'Your student',
+            totalStudyMinutes: todaySessions.reduce((sum, s) => sum + s.durationMinutes, 0),
+            sessions: todaySessions.map(s => {
+                const cls = childClasses.find(c => c.id === s.classId);
+                return { className: cls?.name || 'Unknown', durationMinutes: s.durationMinutes, notes: s.notes };
+            }),
+            giftsReceived: todayGifts
+        }).then(summary => {
+            setAiSummary(summary);
+            setAiSummaryLoading(false);
+        }).catch(() => setAiSummaryLoading(false));
+    }, [summariesEnabled, childProfile, childSessions, childClasses, gifts, aiSummary]);
+
+    // Submit Feedback
+    const handleSubmitFeedback = async () => {
+        if (!feedbackText.trim() || !user) return;
+        setFeedbackSending(true);
+        try {
+            await supabase.from('feedback').insert({ user_id: user.id, message: feedbackText.trim() });
+            setFeedbackSent(true);
+            setFeedbackText('');
+            setTimeout(() => { setFeedbackSent(false); setShowFeedback(false); }, 1500);
+        } catch (e) {
+            console.error('Feedback error:', e);
+            alert('Failed to send feedback. Please try again.');
+        }
+        setFeedbackSending(false);
     };
 
     // Realtime Subscription Effect
     useEffect(() => {
         let channel: any;
         const linkedId = state.linkedUserId || (childProfile ? childProfile.id : null);
+        // Keep ref in sync
+        summariesEnabledRef.current = summariesEnabled;
 
         if (user && linkedId) {
             console.log('[Parent] Subscribing to sessions for:', linkedId);
@@ -176,31 +239,16 @@ export default function ParentDashboard() {
                         // 1. Update List (Always)
                         setChildSessions(prev => [session, ...prev]);
 
-                        const currentTier = notificationTierRef.current;
-
-                        // 2. Handle Notifications based on Tier
-                        if (currentTier === 'none') {
-                            // Do nothing
+                        // 2. Handle Notifications based on toggle
+                        if (!summariesEnabledRef.current) {
                             return;
                         }
 
-                        // For Summary & All: Show In-App Celebration
+                        // Show In-App Celebration
                         setCelebrateSession(session);
 
-                        // For All: Send Push (Local Notification)
-                        if (currentTier === 'all') {
-                            import('@capacitor/local-notifications').then(async ({ LocalNotifications }) => {
-                                await LocalNotifications.schedule({
-                                    notifications: [{
-                                        id: Math.floor(Math.random() * 100000),
-                                        title: "Task Complete! 🎓",
-                                        body: `${childProfile?.full_name || 'Your student'} just studied for ${session.durationMinutes} mins!`,
-                                        schedule: { at: new Date(Date.now() + 1000) }, // 1 sec delay
-                                        sound: 'default'
-                                    }]
-                                });
-                            });
-                        }
+                        // Invalidate cached AI summary so it regenerates
+                        setAiSummary(null);
                     }
                 )
                 .subscribe();
@@ -211,7 +259,7 @@ export default function ParentDashboard() {
         };
     }, [user, state.linkedUserId, childProfile]); // Don't depend on notificationTier, use Ref
 
-    const handlePurchase = async (productId: string, type: 'coins' | 'time', amount: number, isFree: boolean = false) => {
+    const handlePurchase = async (productId: string, type: 'time', amount: number, isFree: boolean = false) => {
         if (!childProfile || !user) return;
         setPurchasing(true);
         try {
@@ -227,7 +275,7 @@ export default function ParentDashboard() {
                     recipient_user_id: childProfile.id,
                     sender_id: user.id,
                     sender_name: 'Parent',
-                    gift_type: type === 'coins' ? 'coins' : 'game_time',
+                    gift_type: 'game_time',
                     amount: amount
                 });
 
@@ -245,9 +293,7 @@ export default function ParentDashboard() {
     };
 
     const handleSendReward = (rewardId: string, isFree: boolean = false) => {
-        if (rewardId === 'coins_10000') {
-            handlePurchase('com.learnloop.reward.coins_10k', 'coins', 10000, isFree);
-        } else if (rewardId === 'break_15') {
+        if (rewardId === 'break_15') {
             handlePurchase('com.learnloop.reward.break_15', 'time', 15, isFree);
         }
     };
@@ -257,7 +303,10 @@ export default function ParentDashboard() {
 
         setPurchasing(true);
         try {
-            // Mock purchase for testing - skip IAP, directly insert gift
+            // Process real IAP purchase
+            const success = await purchaseItem(productId);
+            if (!success) { setPurchasing(false); return; }
+
             await supabase.from('gifts').insert({
                 recipient_user_id: childProfile.id,
                 sender_id: user.id,
@@ -290,25 +339,43 @@ export default function ParentDashboard() {
         try {
             if (!user) throw new Error('NoUser');
 
-            // 1. Verify child
-            const { data: child, error } = await supabase.from('profiles').select('id').eq('id', cleanedId).single();
-            if (error || !child) throw new Error('ChildNotFound');
+            // 1. Verify child exists
+            const { data: child, error: findError } = await supabase.from('profiles').select('id').eq('id', cleanedId).single();
+            if (findError || !child) throw new Error('ChildNotFound');
 
-            // 2. Link
-            await supabase.from('profiles').update({
+            // 2. Link - upsert profile (creates row if it doesn't exist yet)
+            const { error: updateError } = await supabase.from('profiles').upsert({
+                id: user.id,
                 linked_user_id: child.id,
-                role: 'parent' // ensure role
-            }).eq('id', user.id);
+                role: 'parent',
+                is_onboarded: true
+            });
 
-            // 3. Reload
-            alert('Connected! 🎉');
+            if (updateError) {
+                console.error('[Parent] Link upsert error:', updateError);
+                throw new Error('UpdateFailed');
+            }
+
+            // 3. Verify the link persisted
+            const { data: verify } = await supabase.from('profiles').select('linked_user_id').eq('id', user.id).single();
+            if (!verify?.linked_user_id) {
+                console.error('[Parent] linked_user_id did not persist!');
+                throw new Error('LinkNotPersisted');
+            }
+
+            // 4. Show loading screen with confetti
+            setShowLinkSuccess(true);
+            await refreshData();
+            // Wait a moment for the loading animation
+            await new Promise(r => setTimeout(r, 2500));
             window.location.reload();
 
         } catch (e: any) {
-            console.error(e);
+            console.error('[Parent] Link error:', e);
             setIsLinking(false);
             if (e.message === 'ChildNotFound') setLinkError('Student ID not found');
-            else setLinkError('Connection failed');
+            else if (e.message === 'LinkNotPersisted') setLinkError('Link failed to save. Check Supabase permissions.');
+            else setLinkError('Connection failed. Please try again.');
         }
     };
 
@@ -360,19 +427,20 @@ export default function ParentDashboard() {
                     <h1 className="text-h2" style={{ margin: 0 }}>Parent Dashboard</h1>
                 </div>
 
-                {/* Settings Toggle */}
+                {/* Notifications Toggle */}
                 {childProfile && (
                     <button
                         onClick={() => setShowSettings(true)}
                         style={{
                             position: 'absolute', right: 0, top: '16px',
-                            background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer',
-                            opacity: 0.7
+                            background: 'none', border: 'none', cursor: 'pointer',
+                            padding: '4px'
                         }}
                     >
-                        ⚙️
+                        <img src="/icons/notifications.png" alt="Notifications" style={{ width: '36px', height: '36px' }} />
                     </button>
                 )}
+
             </header>
 
             {!childProfile ? (
@@ -397,9 +465,23 @@ export default function ParentDashboard() {
                             onClick={handleLinkStudent}
                             disabled={isLinking}
                             className="btn btn-primary"
-                            style={{ width: '100%' }}
+                            style={{ width: '100%', marginBottom: '12px' }}
                         >
                             {isLinking ? 'Connecting...' : 'Link Account'}
+                        </button>
+                        <button
+                            onClick={() => setShowWhereIsId(true)}
+                            style={{
+                                background: 'none',
+                                border: 'none',
+                                color: 'var(--color-primary)',
+                                fontSize: '0.85rem',
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                                textDecoration: 'underline'
+                            }}
+                        >
+                            Where is my Student ID?
                         </button>
                     </div>
                 </div>
@@ -660,6 +742,57 @@ export default function ParentDashboard() {
                         </div>
                     </div>
 
+                    {/* Premium Upgrade for Student */}
+                    {childProfile && !childProfile.is_premium && (
+                        <div className="card" style={{
+                            background: 'linear-gradient(135deg, #FFD700 0%, #FDB931 100%)',
+                            border: 'none',
+                            marginBottom: '16px'
+                        }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <div>
+                                    <h3 style={{ margin: 0, fontWeight: 800, color: '#5e4002', fontSize: '1.1rem' }}>
+                                        💎 Go Premium
+                                    </h3>
+                                    <p style={{ margin: '4px 0 0 0', fontSize: '0.82rem', color: '#78350f', opacity: 0.9 }}>
+                                        Remove ads for {childProfile.full_name || 'your student'}
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={async () => {
+                                        setPurchasing(true);
+                                        try {
+                                            const success = await purchaseItem('premium_upgrade');
+                                            if (success) {
+                                                // Update the student's premium status
+                                                await supabase.from('profiles').update({ is_premium: true }).eq('id', childProfile.id);
+                                                alert('Premium activated for ' + (childProfile.full_name || 'your student') + '! 🎉');
+                                                window.location.reload();
+                                            }
+                                        } catch (e) {
+                                            console.error(e);
+                                            alert('Purchase failed. Please try again.');
+                                        }
+                                        setPurchasing(false);
+                                    }}
+                                    disabled={purchasing}
+                                    className="btn"
+                                    style={{
+                                        background: 'white',
+                                        color: '#5e4002',
+                                        border: 'none',
+                                        fontWeight: 'bold',
+                                        boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                                        opacity: purchasing ? 0.6 : 1,
+                                        whiteSpace: 'nowrap'
+                                    }}
+                                >
+                                    {purchasing ? '...' : '$4.99/mo'}
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Quick Stats Grid */}
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
                         <div className="card" style={{ textAlign: 'center', padding: '16px', background: 'linear-gradient(135deg, #f97316 0%, #fb923c 100%)', color: 'white' }}>
@@ -723,7 +856,7 @@ export default function ParentDashboard() {
                                     Recent Activity
                                 </h3>
                                 <div style={{ display: 'grid', gap: '8px' }}>
-                                    {activityFeed.map((item: any, i) => {
+                                    {activityFeed.slice(0, 3).map((item: any, i) => {
                                         if (item.type === 'session') {
                                             const session = item.data;
                                             const cls = childClasses.find(c => c.id === session.classId);
@@ -808,13 +941,64 @@ export default function ParentDashboard() {
                                         }
                                     })}
                                 </div>
+                                {activityFeed.length > 3 && (
+                                    <button
+                                        onClick={() => setShowFullHistory(true)}
+                                        className="btn"
+                                        style={{
+                                            width: '100%',
+                                            marginTop: '12px',
+                                            background: 'rgba(255,255,255,0.2)',
+                                            color: 'white',
+                                            border: '1px solid rgba(255,255,255,0.3)',
+                                            fontWeight: 600
+                                        }}
+                                    >
+                                        View Entire History ({activityFeed.length} items) →
+                                    </button>
+                                )}
                             </div>
                         )
                     }
                 </div>
             )}
 
+            {/* AI Daily Summary Card */}
+            {childProfile && summariesEnabled && (
+                <div className="card" style={{ marginTop: '24px', padding: '20px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                        <span style={{ fontSize: '1.2rem' }}>✨</span>
+                        <h3 className="text-h3" style={{ margin: 0 }}>Today's AI Summary</h3>
+                    </div>
+                    {aiSummaryLoading ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#888' }}>
+                            <div style={{ width: '16px', height: '16px', border: '2px solid #ddd', borderTop: '2px solid var(--color-primary)', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+                            Generating summary...
+                        </div>
+                    ) : aiSummary ? (
+                        <p style={{ color: '#555', lineHeight: 1.6, fontSize: '0.95rem', margin: 0 }}>{aiSummary}</p>
+                    ) : (
+                        <p style={{ color: '#999', fontSize: '0.9rem', margin: 0 }}>No study activity yet today. Check back later!</p>
+                    )}
+                </div>
+            )}
+
             <div style={{ marginTop: '40px', paddingBottom: '40px', textAlign: 'center' }}>
+                <button
+                    onClick={() => setShowFeedback(true)}
+                    className="btn"
+                    style={{
+                        width: '100%',
+                        marginBottom: '16px',
+                        background: '#eff6ff',
+                        border: '1px solid #93c5fd',
+                        color: '#1d4ed8',
+                        fontWeight: 600,
+                        fontSize: '0.9rem'
+                    }}
+                >
+                    💬 Send Feedback
+                </button>
                 <button onClick={signOut} className="btn" style={{
                     background: 'transparent',
                     color: 'var(--color-text-secondary)',
@@ -822,6 +1006,21 @@ export default function ParentDashboard() {
                     fontSize: '0.9rem'
                 }}>
                     Sign Out
+                </button>
+                <button
+                    onClick={() => setShowDeleteModal(true)}
+                    className="btn"
+                    style={{
+                        width: '100%',
+                        marginTop: '12px',
+                        background: '#fee2e2',
+                        border: '1px solid #f87171',
+                        color: '#991b1b',
+                        fontWeight: 600,
+                        fontSize: '0.9rem'
+                    }}
+                >
+                    Delete Account
                 </button>
             </div>
 
@@ -870,74 +1069,335 @@ export default function ParentDashboard() {
                                 >
                                     {hasSentFreeGiftToday ? '☕️ 15m ($1.99)' : '🎁 15m (Free!)'}
                                 </button>
-                                <button
-                                    onClick={() => { handlePurchase('com.learnloop.reward.coins_10k', 'coins', 2500, false); setCelebrateSession(null); }}
-                                    className="btn"
-                                    style={{ background: 'white', border: '1px solid #d97706', color: '#d97706', fontSize: '0.8rem', padding: '8px' }}
-                                >
-                                    💰 2,500 Coins
-                                </button>
                             </div>
                         </div>
                     </div>
                 )}
             </Modal>
 
-            {/* Settings Modal */}
+            {/* Settings Modal (Toggle) */}
             <Modal
                 isOpen={showSettings}
                 onClose={() => setShowSettings(false)}
-                title="Notification Settings"
+                title="Notifications"
             >
-                <div style={{ padding: '0 8px' }}>
-                    <p style={{ color: '#666', marginBottom: '24px', fontSize: '0.9rem' }}>
-                        Choose how you want to be notified about your student's progress.
-                    </p>
-
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                        {[
-                            { value: 'all', label: 'All Alerts', desc: 'Get notified for every completed study session', icon: '🔔' },
-                            { value: 'summary', label: 'Daily Summary', desc: 'In-app updates only (Still in Beta)', icon: '📝' },
-                            { value: 'none', label: 'None', desc: 'Don\'t send me any notifications', icon: '🔕' }
-                        ].map((option) => (
-                            <div
-                                key={option.value}
-                                onClick={() => updateNotificationTier(option.value as any)}
-                                style={{
-                                    display: 'flex', alignItems: 'center', gap: '16px',
-                                    padding: '16px',
-                                    borderRadius: '12px',
-                                    border: notificationTier === option.value ? '2px solid var(--color-primary)' : '1px solid #eee',
-                                    background: notificationTier === option.value ? '#fff7ed' : 'white',
-                                    cursor: 'pointer',
-                                    transition: 'all 0.2s ease'
-                                }}
-                            >
-                                <div style={{ fontSize: '1.5rem' }}>{option.icon}</div>
-                                <div style={{ flex: 1 }}>
-                                    <div style={{ fontWeight: 600, color: '#333' }}>{option.label}</div>
-                                    <div style={{ fontSize: '0.8rem', color: '#888' }}>{option.desc}</div>
-                                </div>
-                                <div style={{
-                                    width: '20px', height: '20px',
-                                    borderRadius: '50%',
-                                    border: '2px solid ' + (notificationTier === option.value ? 'var(--color-primary)' : '#ccc'),
-                                    display: 'flex', alignItems: 'center', justifyContent: 'center'
-                                }}>
-                                    {notificationTier === option.value && (
-                                        <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: 'var(--color-primary)' }} />
-                                    )}
-                                </div>
+                <div style={{ padding: '8px' }}>
+                    <div style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        padding: '20px',
+                        background: summariesEnabled ? '#fff7ed' : '#f9fafb',
+                        borderRadius: '16px',
+                        border: summariesEnabled ? '2px solid var(--color-primary)' : '1px solid #e5e7eb',
+                        transition: 'all 0.3s ease'
+                    }}>
+                        <div>
+                            <div style={{ fontWeight: 700, fontSize: '1rem', color: '#333' }}>Daily AI Summary</div>
+                            <div style={{ fontSize: '0.82rem', color: '#888', marginTop: '4px' }}>
+                                {summariesEnabled ? 'Get an AI-powered summary of your student\'s day' : 'Summaries are off'}
                             </div>
-                        ))}
+                        </div>
+                        <div
+                            onClick={toggleSummaries}
+                            style={{
+                                width: '52px', height: '28px',
+                                borderRadius: '14px',
+                                background: summariesEnabled ? 'var(--color-primary)' : '#d1d5db',
+                                cursor: 'pointer',
+                                position: 'relative',
+                                transition: 'background 0.3s ease',
+                                flexShrink: 0
+                            }}
+                        >
+                            <div style={{
+                                width: '22px', height: '22px',
+                                borderRadius: '50%',
+                                background: 'white',
+                                position: 'absolute',
+                                top: '3px',
+                                left: summariesEnabled ? '27px' : '3px',
+                                transition: 'left 0.3s ease',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
+                            }} />
+                        </div>
                     </div>
+                    <p style={{ fontSize: '0.8rem', color: '#aaa', marginTop: '12px', textAlign: 'center' }}>
+                        When enabled, an AI summary appears on your dashboard each day.
+                    </p>
                 </div>
-                <div style={{ marginTop: '24px', textAlign: 'right' }}>
+                <div style={{ marginTop: '20px' }}>
                     <button onClick={() => setShowSettings(false)} className="btn btn-primary" style={{ width: '100%' }}>
                         Done
                     </button>
                 </div>
             </Modal>
+
+            {/* Feedback Modal */}
+            <Modal
+                isOpen={showFeedback}
+                onClose={() => { setShowFeedback(false); setFeedbackSent(false); }}
+                title="Send Feedback"
+            >
+                {feedbackSent ? (
+                    <div style={{ textAlign: 'center', padding: '24px' }}>
+                        <div style={{ fontSize: '3rem', marginBottom: '12px' }}>✅</div>
+                        <p style={{ fontWeight: 700, fontSize: '1.1rem' }}>Thank you!</p>
+                        <p style={{ color: '#666', fontSize: '0.9rem' }}>Your feedback has been recorded.</p>
+                    </div>
+                ) : (
+                    <div>
+                        <p style={{ color: '#666', fontSize: '0.9rem', marginBottom: '16px' }}>
+                            Let us know how we can improve Study Budy!
+                        </p>
+                        <textarea
+                            value={feedbackText}
+                            onChange={e => setFeedbackText(e.target.value)}
+                            placeholder="What's on your mind?"
+                            rows={4}
+                            style={{
+                                width: '100%',
+                                padding: '12px',
+                                borderRadius: '12px',
+                                border: '1px solid #ddd',
+                                fontSize: '0.95rem',
+                                resize: 'vertical',
+                                fontFamily: 'inherit'
+                            }}
+                        />
+                        <button
+                            onClick={handleSubmitFeedback}
+                            disabled={feedbackSending || !feedbackText.trim()}
+                            className="btn btn-primary"
+                            style={{ width: '100%', marginTop: '12px', opacity: feedbackSending || !feedbackText.trim() ? 0.5 : 1 }}
+                        >
+                            {feedbackSending ? 'Sending...' : 'Submit Feedback'}
+                        </button>
+                    </div>
+                )}
+            </Modal>
+
+            {/* Delete Account Modal */}
+            <Modal
+                isOpen={showDeleteModal}
+                onClose={() => setShowDeleteModal(false)}
+                title="Delete Account?"
+                type="danger"
+                actions={
+                    <>
+                        <button className="btn btn-secondary" onClick={() => setShowDeleteModal(false)}>Cancel</button>
+                        <button
+                            className="btn"
+                            style={{ background: '#dc2626', color: 'white' }}
+                            onClick={async () => {
+                                await deleteAccount();
+                            }}
+                        >
+                            Confirm Delete
+                        </button>
+                    </>
+                }
+            >
+                <p><strong>Warning: This action is permanent!</strong></p>
+                <p style={{ marginTop: '12px' }}>
+                    Deleting your account will remove your parent profile and unlink from your student.
+                </p>
+            </Modal>
+
+            {/* Where is my Student ID? Modal */}
+            <Modal
+                isOpen={showWhereIsId}
+                onClose={() => setShowWhereIsId(false)}
+                title="Finding the Student ID"
+            >
+                <div style={{ textAlign: 'center', padding: '16px' }}>
+                    <div style={{ fontSize: '4rem', marginBottom: '16px' }}>🔍</div>
+                    <div style={{ textAlign: 'left', lineHeight: 1.8 }}>
+                        <p style={{ marginBottom: '12px', fontWeight: 600 }}>On your student's phone:</p>
+                        <ol style={{ paddingLeft: '20px', color: '#555' }}>
+                            <li>Open <strong>Study Budy</strong></li>
+                            <li>Go to <strong>Settings</strong> (bottom of dashboard)</li>
+                            <li>Scroll to the <strong>Account</strong> section</li>
+                            <li>Copy the <strong>Student ID</strong> or tap <strong>Invite Parent</strong></li>
+                        </ol>
+                    </div>
+                    <div style={{
+                        marginTop: '20px',
+                        padding: '16px',
+                        background: '#f0f9ff',
+                        borderRadius: '12px',
+                        border: '1px solid #bae6fd'
+                    }}>
+                        <p style={{ fontSize: '0.85rem', color: '#0369a1', fontWeight: 600 }}>
+                            📹 Video walkthrough coming soon!
+                        </p>
+                    </div>
+                </div>
+                <div style={{ marginTop: '16px', textAlign: 'right' }}>
+                    <button onClick={() => setShowWhereIsId(false)} className="btn btn-primary" style={{ width: '100%' }}>
+                        Got it!
+                    </button>
+                </div>
+            </Modal>
+
+            {/* Full History Modal */}
+            <Modal
+                isOpen={showFullHistory}
+                onClose={() => setShowFullHistory(false)}
+                title="Activity History"
+            >
+                <div style={{ maxHeight: '60vh', overflowY: 'auto', display: 'grid', gap: '8px' }}>
+                    {activityFeed.map((item: any, i) => {
+                        if (item.type === 'session') {
+                            const session = item.data;
+                            const cls = childClasses.find(c => c.id === session.classId);
+                            return (
+                                <div key={i} style={{
+                                    display: 'flex', flexDirection: 'column', gap: '4px',
+                                    padding: '12px',
+                                    background: '#fff7ed',
+                                    borderRadius: '12px',
+                                    border: '1px solid #fed7aa'
+                                }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                            <div style={{
+                                                width: '32px', height: '32px', borderRadius: '50%',
+                                                background: cls?.color || '#eee',
+                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                fontWeight: 'bold', fontSize: '0.9rem',
+                                                color: 'white'
+                                            }}>
+                                                {cls?.name.substring(0, 1) || '?'}
+                                            </div>
+                                            <div style={{ fontSize: '1rem', fontWeight: 600 }}>
+                                                {cls?.name || 'Unknown Class'}
+                                            </div>
+                                        </div>
+                                        <div style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--color-primary)' }}>
+                                            {session.durationMinutes}m
+                                        </div>
+                                    </div>
+                                    {session.notes && (
+                                        <div style={{
+                                            fontSize: '0.85rem', background: '#fef3c7',
+                                            padding: '8px', borderRadius: '8px', marginTop: '4px',
+                                            fontStyle: 'italic', color: '#92400e'
+                                        }}>
+                                            "{session.notes}"
+                                        </div>
+                                    )}
+                                    <div style={{ fontSize: '0.75rem', color: '#999', textAlign: 'right', marginTop: '4px' }}>
+                                        {new Date(session.timestamp).toLocaleDateString()} {new Date(session.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </div>
+                                </div>
+                            );
+                        } else {
+                            const g = item.data;
+                            const isCoins = g.gift_type === 'coins';
+                            const isTime = g.gift_type === 'game_time';
+                            return (
+                                <div key={i} style={{
+                                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                    padding: '12px',
+                                    background: '#f0fdf4',
+                                    borderRadius: '12px',
+                                    border: '1px solid #bbf7d0'
+                                }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                        <div style={{ fontSize: '1.5rem' }}>🎁</div>
+                                        <div>
+                                            <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>
+                                                Sent {isCoins ? 'Coins' : (isTime ? 'Game Time' : 'Character')}
+                                            </div>
+                                            <div style={{ fontSize: '0.8rem', color: '#666' }}>
+                                                {isCoins ? `${g.amount} coins` : (isTime ? `${g.amount}m` : 'Rare Unlock')}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {g.thanked ? (
+                                        <div style={{
+                                            background: '#dcfce7', color: '#166534',
+                                            padding: '4px 8px', borderRadius: '8px',
+                                            fontSize: '0.75rem', fontWeight: 800
+                                        }}>
+                                            Thanked! ❤️
+                                        </div>
+                                    ) : (
+                                        <div style={{ fontSize: '0.75rem', color: '#999' }}>Sent</div>
+                                    )}
+                                </div>
+                            );
+                        }
+                    })}
+                </div>
+            </Modal>
+
+            {/* Link Success Overlay with Confetti */}
+            {showLinkSuccess && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0, left: 0,
+                    width: '100vw', height: '100vh',
+                    zIndex: 9999,
+                    background: 'linear-gradient(180deg, #fff5ee 0%, #ffe4d4 100%)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    overflow: 'hidden'
+                }}>
+                    {/* Confetti pieces */}
+                    {Array.from({ length: 50 }).map((_, i) => (
+                        <div
+                            key={i}
+                            style={{
+                                position: 'absolute',
+                                top: '-10px',
+                                left: `${Math.random() * 100}%`,
+                                width: `${8 + Math.random() * 8}px`,
+                                height: `${8 + Math.random() * 8}px`,
+                                background: ['#f43f5e', '#fb923c', '#facc15', '#22c55e', '#3b82f6', '#8b5cf6', '#ec4899'][i % 7],
+                                borderRadius: Math.random() > 0.5 ? '50%' : '2px',
+                                animation: `confetti-fall ${2 + Math.random() * 3}s ease-in forwards`,
+                                animationDelay: `${Math.random() * 1.5}s`,
+                                transform: `rotate(${Math.random() * 360}deg)`
+                            }}
+                        />
+                    ))}
+                    <img
+                        src="/assets/avatar_golden_munchkin.png"
+                        alt="Connected!"
+                        style={{
+                            width: '200px',
+                            height: '200px',
+                            objectFit: 'contain',
+                            imageRendering: 'pixelated',
+                            animation: 'splash-bounce 1.5s ease-in-out infinite',
+                            filter: 'drop-shadow(0 12px 32px rgba(255, 126, 54, 0.4))'
+                        }}
+                    />
+                    <p style={{
+                        marginTop: '28px',
+                        fontSize: '1.4rem',
+                        fontWeight: 800,
+                        color: '#E84545',
+                        animation: 'splash-fade 1.5s ease-in-out infinite'
+                    }}>Connected! 🎉</p>
+                    <style jsx>{`
+                        @keyframes confetti-fall {
+                            0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+                            100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+                        }
+                        @keyframes splash-bounce {
+                            0%, 100% { transform: scale(1); }
+                            50% { transform: scale(1.06); }
+                        }
+                        @keyframes splash-fade {
+                            0%, 100% { opacity: 0.7; }
+                            50% { opacity: 1; }
+                        }
+                    `}</style>
+                </div>
+            )}
         </main >
     );
 }

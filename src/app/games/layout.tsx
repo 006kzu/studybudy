@@ -11,34 +11,43 @@ export default function GamesLayout({ children }: { children: React.ReactNode })
     const intervalRef = useRef<NodeJS.Timeout | null>(null);
     const sessionMinutesPlayed = useRef(0);
 
+    useEffect(() => {
+        // Banner Ad
+        if (!state.isPremium) {
+            AdMobService.showBanner();
+        }
+
+        return () => {
+            AdMobService.removeBanner();
+        };
+    }, [state.isPremium]);
+
     // Global Game Timer Logic
     useEffect(() => {
         if (isLoading) return;
 
-        // Start Timer
-        intervalRef.current = setInterval(() => {
+        // Delay first consumption by 60s to ensure player gets at least 1 minute
+        const firstTimeout = setTimeout(() => {
             if (state.gameTimeBank > 0) {
                 consumeGameTime(1);
                 sessionMinutesPlayed.current += 1;
-
-                // Ad Logic Check (Every 5 mins) -> Handled via Event? 
-                // Or we can just set a flag in a context or store?
-                // Actually, the "Game Over" logic needs to check this.
-                // We can use sessionStorage or a global variable since this layout wraps everything.
-                if (sessionMinutesPlayed.current > 0 && sessionMinutesPlayed.current % 5 === 0) {
-                    sessionStorage.setItem('ad_pending', 'true');
-                }
-            } else {
-                // Time up!
-                // We should probably redirect or block usage if in a game.
-                // But let's be nice and let them finish the current run?
-                // The games check `timeLeft` usually. 
-                // We can force a redirect if we want strict enforcement.
-                // router.replace('/games'); // Maybe too harsh?
             }
-        }, 60000); // Every minute
+
+            // Then continue every minute
+            intervalRef.current = setInterval(() => {
+                if (state.gameTimeBank > 0) {
+                    consumeGameTime(1);
+                    sessionMinutesPlayed.current += 1;
+
+                    if (sessionMinutesPlayed.current > 0 && sessionMinutesPlayed.current % 5 === 0) {
+                        sessionStorage.setItem('ad_pending', 'true');
+                    }
+                }
+            }, 60000);
+        }, 60000);
 
         return () => {
+            clearTimeout(firstTimeout);
             if (intervalRef.current) clearInterval(intervalRef.current);
         };
     }, [isLoading, state.gameTimeBank, consumeGameTime]);

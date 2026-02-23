@@ -91,12 +91,13 @@ type AppState = {
     linkedUserId?: string;
     lastRefreshed?: number;
     notificationTier: 'none' | 'summary' | 'all';
-    // Character Tier Credits (Consumable)
     characterCredits: {
         legendary: number;
         epic: number;
         rare: number;
     };
+    connectionError?: boolean;
+    hasCompletedStudyTutorial: boolean;
 };
 
 type AppContextType = {
@@ -143,6 +144,7 @@ type AppContextType = {
     submitGameScore: (gameId: string, score: number) => Promise<number | null>; // Returns rank if on leaderboard, null otherwise
     claimPendingGifts: () => Promise<{ coins: number; gameMinutes: number; senderName: string; giftCredits?: { legendary: number; epic: number; rare: number } } | null>; // Claims any pending gifts
     consumeGameTime: (minutes: number) => Promise<void>; // Decrement Game Bank
+    completeTutorial: () => void;
 };
 
 const initialState: AppState = {
@@ -171,7 +173,9 @@ const initialState: AppState = {
         legendary: 0,
         epic: 0,
         rare: 0
-    }
+    },
+    connectionError: false,
+    hasCompletedStudyTutorial: false
 };
 
 
@@ -194,7 +198,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         // Native Deep Link Handling
         if (Capacitor.isNativePlatform()) {
             import('@/lib/admob').then(({ AdMobService }) => {
-                AdMobService.initialize();
+                try {
+                    AdMobService.initialize();
+                } catch (e) {
+                    console.error('[AdMob] Init failed:', e);
+                }
             });
 
             // Initialize IAP
@@ -203,7 +211,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             });
 
             CapApp.addListener('appUrlOpen', async (event: URLOpenListenerEvent) => {
-                if (event.url.includes('google-auth')) {
+                // Check for our custom scheme OR the old google-auth path just in case
+                if (event.url.includes('com.zachthomas.studybudy.learnloop') || event.url.includes('callback') || event.url.includes('google-auth')) {
                     // Supabase sends tokens in the hash or query
                     const url = new URL(event.url);
                     const hash = url.hash.substring(1); // remove #
@@ -234,10 +243,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                         });
 
                         if (!error) {
-                            // Session set successfully
-                            console.log('[DeepLink] Session set, redirecting to Dashboard...');
-                            // Force hard reload or router replace? Router replace is smoother.
-                            router.replace('/dashboard');
+                            // Session set successfully.
+                            // CRITICAL: Use window.location.href for a FULL PAGE RELOAD.
+                            // After returning from the OAuth browser, the WebView's network
+                            // stack is broken (connections have no local endpoint). A soft
+                            // router.replace keeps the broken network context, so all
+                            // Supabase queries hang. A full reload reinitializes everything,
+                            // which is why 'restart the app' always worked.
+                            console.log('[DeepLink] Session set. Doing full page reload to /dashboard...');
+                            window.location.href = '/dashboard';
                         } else {
                             console.error('[DeepLink] Failed to set session:', error);
                             // Retry close just in case
@@ -250,33 +264,47 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         // ... remaining code ...
 
         const init = async () => {
+            console.log('[AppContext] init() called');
             const { data: { session } } = await supabase.auth.getSession();
+            console.log('[AppContext] getSession result:', session?.user?.id);
             setUser(session?.user || null);
 
             if (session?.user) {
                 if (lastFetchedUserId.current !== session.user.id) {
+                    console.log('[AppContext] User changed (init), fetching data for:', session.user.id);
                     lastFetchedUserId.current = session.user.id;
                     await loadRemoteData(session.user.id);
+                } else {
+                    console.log('[AppContext] User match (init), skipping fetch? Ref:', lastFetchedUserId.current);
+                    // Force fetch anyway on init to be safe?
+                    // await loadRemoteData(session.user.id);
                 }
             } else {
+                console.log('[AppContext] No user (init), loading local');
                 loadLocalData();
             }
+            console.log('[AppContext] init() finished, setting isLoading = false');
             setIsLoading(false);
         };
 
         const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+            console.log(`[AppContext] Auth Event: ${event}`, session?.user?.id);
             if (event === 'SIGNED_IN' && session) {
                 setUser(session.user);
+
+                // Don't try to fetch data here. On native, the deep link handler
+                // does a full page reload after setSession(), so init() will
+                // handle data loading with a fresh network context.
+                // Trying to fetch here fails because the WebView network stack
+                // is broken after returning from the OAuth browser.
                 if (lastFetchedUserId.current !== session.user.id) {
-                    lastFetchedUserId.current = session.user.id;
-                    setIsLoading(true); // Show loading while fetching
-                    await loadRemoteData(session.user.id);
-                    setIsLoading(false);
+                    console.log('[AppContext] Auth SIGNED_IN: new user detected. Will load data via init() after page reload.');
+                    setIsLoading(true);
+                    // DO NOT fetch here — let init() handle it
                 }
             } else if (event === 'SIGNED_OUT') {
                 setUser(null);
                 lastFetchedUserId.current = null;
-                loadLocalData(); // Fallback to local
                 setIsLoading(false);
             }
         });
@@ -305,8 +333,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
 
     const loadRemoteData = async (userId: string, forceRefresh: boolean = false) => {
-        // Default to loading ONLY if we don't find cache
-        if (forceRefresh) setIsLoading(true);
+        console.log(`[AppContext] loadRemoteData called for ${userId}. Force: ${forceRefresh}`);
+        // Reset connection error on new fetch
+        if (forceRefresh) {
+            setIsLoading(true);
+            setState(prev => ({ ...prev, connectionError: false }));
+        }
 
         // 1. Try Cache First (if not forcing refresh)
         if (!forceRefresh) {
@@ -315,95 +347,117 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 const cached = localStorage.getItem(cacheKey);
                 if (cached) {
                     const { timestamp, data } = JSON.parse(cached);
-                    // SWR: Always use cache if available for immediate display
                     if (data) {
                         console.log(`[AppContext] Cache Found. Displaying immediately.`);
-                        setState({ ...initialState, ...data });
-                        setIsLoading(false); // <--- Hides spinner immediately
+                        setState({ ...initialState, ...data, connectionError: false }); // Ensure no error if cache exists
+                        setIsLoading(false);
 
-                        // Check freshness to decide if we stop or revalidate
                         const age = Date.now() - timestamp;
                         if (age < CACHE_DURATION) {
                             console.log(`[AppContext] Cache is fresh (${Math.round(age / 1000)}s). Skipping background fetch.`);
-                            return; // Exit early
+                            return;
                         }
                         console.log(`[AppContext] Cache is stale (${Math.round(age / 1000)}s). Revalidating in background...`);
                     }
                 }
             } catch (e) {
-                console.warn('[AppContext] Cache parse error', e instanceof Error ? e.message : JSON.stringify(e, null, 2));
+                console.warn('[AppContext] Cache parse error', e);
             }
         }
-
-        // 2. Fetch from DB (Cache Miss or Revalidation)
-        // Only set loading if we haven't already shown cached data
-        // We know we haven't returned, so we are here. 
-        // If isLoading was set to false by cache, don't set it to true again (prevents flashing).
-        // Check current loading state? setState is async. 
-        // Safer: If we didn't hit cache return, we proceed. 
-        // If we displayed cache, we don't want spinner. 
-        // But we didn't track that locally in a var.
-        // Let's just trust that if we are revalidating, we don't want spinner.
-
-        // Correct Logic:
-        // We can't easily check 'state' here inside the function.
-        // We'll rely on our code path.
-        // If we fell through:
-        // Case A: Cache Hit (Stale) -> setIsLoading(false) called. 
-        // Case B: No Cache -> setIsLoading(true) should be called?
-
-        // Refactored flow:
-        // We removed 'setIsLoading(true)' from top. We need it for Case B.
-
-
-        // 2. Fetch from DB (Cache Miss or Stale)
-
-        // 2. Fetch from DB
-        // If we didn't show cache (we can't easily check react state sync, so let's check localstorage again or just assume?)
-        // Better: We did 'setIsLoading(false)' if cache found. 
-        // If we are here, we either showed cache (stale) OR we have no cache.
-        // If we have no cache, we should show spinner.
 
         const hasCache = !forceRefresh && !!localStorage.getItem(CACHE_KEY_PREFIX + userId);
         if (!hasCache) setIsLoading(true);
 
-        // Safety Timeout: If DB fetch hangs for 10s, stop loading to allow UI to show (likely empty/offline)
-        const safetyTimeout = setTimeout(() => {
-            if (isLoading) {
-                console.warn('[AppContext] Data fetch timed out (10s). forcing loading false.');
-                setIsLoading(false);
+        // Check for account deletion marker (set by deleteAccount)
+        const deletionMarker = `account_deleted_${userId}`;
+        if (localStorage.getItem(deletionMarker)) {
+            console.log('[AppContext] Account deletion marker found! Force-resetting profile...');
+            localStorage.removeItem(deletionMarker);
+            // Force profile reset even if RLS blocked it during deletion
+            try {
+                const { error: e1 } = await supabase.from('study_sessions').delete().eq('user_id', userId);
+                console.log('[Delete] study_sessions:', e1 ? e1.message : 'OK');
+                const { error: e2 } = await supabase.from('schedule_items').delete().eq('user_id', userId);
+                console.log('[Delete] schedule_items:', e2 ? e2.message : 'OK');
+                const { error: e3 } = await supabase.from('classes').delete().eq('user_id', userId);
+                console.log('[Delete] classes:', e3 ? e3.message : 'OK');
+                const { error: e4 } = await supabase.from('profiles').update({
+                    is_onboarded: false,
+                    role: null,
+                    points: 0,
+                    inventory: [],
+                    equipped_avatar: 'Default Dog',
+                    game_time_bank: 0,
+                    is_premium: false,
+                    has_completed_study_tutorial: false,
+                    tier_legendary_credits: 0,
+                    tier_epic_credits: 0,
+                    tier_rare_credits: 0,
+                    high_scores: {},
+                    study_notes: {},
+                    linked_user_id: null,
+                    notification_tier: 'summary',
+                    sleep_settings: null,
+                    notifications: null,
+                    zen_mode: null
+                }).eq('id', userId);
+                console.log('[Delete] profile reset:', e4 ? e4.message : 'OK');
+                // Verify
+                const { data: verify } = await supabase.from('profiles').select('is_onboarded, role, points').eq('id', userId).single();
+                console.log('[Delete] Verification:', verify);
+            } catch (e) {
+                console.error('[AppContext] Post-deletion cleanup error:', e);
             }
-        }, 10000);
+            // Force onboarding by setting state directly
+            setState({ ...initialState, connectionError: false });
+            setIsLoading(false);
+            return;
+        }
 
-        // Helper for individual fetches to prevent one failure blocking others
+        // Helper for individual fetches
         const fetchTable = async (table: string, query: any) => {
             try {
-                // console.log(`[AppContext] Fetching ${table}...`);
                 const { data, error } = await query;
                 if (error) {
                     console.error(`[AppContext] Supabase Error on ${table}:`, JSON.stringify(error, null, 2));
-                    // throw error; // Don't throw, just return null so other fetches can succeed
-                    return null;
+                    return null; // Return null on Error
                 }
-                // console.log(`[AppContext] ${table} loaded. Rows:`, data?.length);
-                return data;
+                return data; // Return Array on Success
             } catch (e: any) {
                 console.error(`[AppContext] ${table} EXCEPTION:`, e);
                 return null;
             }
         };
-
+        // 15 Second Timeout to prevent infinite spinner
         try {
-            // Execute in parallel
-            // Fetch Profile as array (limit 1) to avoid .single() 406 error on missing rows
-            const [profileData, classes, schedule, sessions] = await Promise.all([
-                fetchTable('Profile', supabase.from('profiles').select('*').eq('id', userId).limit(1)),
-                fetchTable('Classes', supabase.from('classes').select('*').eq('user_id', userId)),
-                fetchTable('Schedule', supabase.from('schedule_items').select('*').eq('user_id', userId)),
-                fetchTable('Sessions', supabase.from('study_sessions').select('*').eq('user_id', userId))
-            ]);
+            const fetchPromise = async () => {
+                // STEP 1: Fetch Profile
+                const profileData = await fetchTable('Profile', supabase.from('profiles').select('*').eq('id', userId).limit(1));
 
-            const profile = profileData && profileData.length > 0 ? profileData[0] : null;
+                if (profileData === null) throw new Error('Profile Fetch Failed');
+
+                const profile = profileData.length > 0 ? profileData[0] : null;
+
+                // STEP 2: Fetch Rest
+                // Optimizing fetch: Limit sessions to last 30 days
+                const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+                const [classes, schedule, sessions] = await Promise.all([
+                    fetchTable('Classes', supabase.from('classes').select('*').eq('user_id', userId)),
+                    fetchTable('Schedule', supabase.from('schedule_items').select('*').eq('user_id', userId)),
+                    fetchTable('Sessions', supabase.from('study_sessions').select('*').eq('user_id', userId).gte('created_at', thirtyDaysAgo))
+                ]);
+
+                if (classes === null || schedule === null || sessions === null) throw new Error('Data Fetch Failed');
+
+                return { profile, classes, schedule, sessions };
+            };
+
+            const timeoutPromise = new Promise<{ profile: any, classes: any[], schedule: any[], sessions: any[] }>((_, reject) =>
+                setTimeout(() => reject(new Error('Data Load Timeout')), 15000)
+            );
+
+            const { profile, classes, schedule, sessions } = await Promise.race([fetchPromise(), timeoutPromise]);
 
             console.log('[AppContext] Loaded Remote Data (Count):', {
                 profile: profile ? 'Found' : 'Null',
@@ -412,7 +466,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 sessions: sessions?.length || 0
             });
 
-            // Map DB structure to AppState (safely handling nulls)
+            // Map DB structure to AppState
             const newState: AppState = {
                 classes: (classes as any[])?.map(c => ({
                     id: c.id,
@@ -421,30 +475,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                     color: c.color,
                     isArchived: c.is_archived
                 })) || [],
-                schedule: (schedule as any[])?.map(s => {
-                    // Debug individual item mapping if needed
-                    // console.log('Mapping schedule item:', s);
-                    return {
-                        id: s.id,
-                        day: s.day as any,
-                        startTime: s.start_time,
-                        endTime: s.end_time,
-                        type: s.type as any,
-                        label: s.label,
-                        classId: s.class_id,
-                        isRecurring: s.is_recurring,
-                        specificDate: s.specific_date,
-                        startDate: s.start_date,
-                        color: s.color
-                    };
-                }) || [],
+                schedule: (schedule as any[])?.map(s => ({
+                    id: s.id,
+                    day: s.day as any,
+                    startTime: s.start_time,
+                    endTime: s.end_time,
+                    type: s.type as any,
+                    label: s.label,
+                    classId: s.class_id,
+                    isRecurring: s.is_recurring,
+                    specificDate: s.specific_date,
+                    startDate: s.start_date,
+                    color: s.color
+                })) || [],
                 studySessions: (sessions as any[])?.map(s => ({
                     id: s.id,
                     classId: s.class_id,
                     durationMinutes: s.duration_minutes,
                     pointsEarned: s.points_earned,
                     timestamp: new Date(s.created_at).getTime(),
-                    notes: s.notes // Map notes field
+                    notes: s.notes
                 })) || [],
                 points: (profile as any)?.points || 0,
                 inventory: (profile as any)?.inventory || [],
@@ -455,7 +505,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 zenMode: (profile as any)?.zen_mode || initialState.zenMode,
                 isPremium: (profile as any)?.is_premium || false,
                 breakTimer: initialState.breakTimer,
-                gameTimeBank: (profile as any)?.game_time_bank || 0, // Load from DB
+                gameTimeBank: (profile as any)?.game_time_bank || 0,
                 game4096: null,
                 activeSession: null,
                 highScores: {},
@@ -467,61 +517,51 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                     legendary: (profile as any)?.tier_legendary_credits || 0,
                     epic: (profile as any)?.tier_epic_credits || 0,
                     rare: (profile as any)?.tier_rare_credits || 0
-                }
+                },
+                connectionError: false, // Clear error on success
+                hasCompletedStudyTutorial: (profile as any)?.has_completed_study_tutorial || false
             };
 
-            // Restore activeSession from local storage explicitly if we are overwriting state
+            // Restore activeSession from local storage
             const savedLocal = localStorage.getItem('study_budy_data');
             if (savedLocal) {
                 try {
                     const parsed = JSON.parse(savedLocal);
-                    if (parsed.activeSession) {
-                        newState.activeSession = parsed.activeSession;
-                    }
-                    if (parsed.highScores) {
-                        newState.highScores = parsed.highScores;
-                    }
+                    if (parsed.activeSession) newState.activeSession = parsed.activeSession;
+                    if (parsed.highScores) newState.highScores = parsed.highScores;
                 } catch (e) { }
             }
 
-            // console.log('[AppContext] New State Set:', newState);
+            console.log('[AppContext] Setting AppState with new classes:', newState.classes);
             setState(newState);
 
-            // Only cache if NO errors occurred (all fetches returned valid data or empty arrays, but not null from catch)
-            // But fetchTable returns null on error. 
-            // Profile returning null might be valid (first login). 
-            // Classes/Schedule returning null is an error.
-            const anyErrors = classes === null || schedule === null || sessions === null;
+            const cacheData = {
+                classes: newState.classes,
+                schedule: newState.schedule,
+                studySessions: newState.studySessions,
+                points: newState.points,
+                inventory: newState.inventory,
+                equippedAvatar: newState.equippedAvatar,
+                isOnboarded: newState.isOnboarded,
+                isRoleSet: newState.isRoleSet,
+                sleepSettings: newState.sleepSettings,
+                notifications: newState.notifications, // Add notifications to cache
+                zenMode: newState.zenMode, // Add zenMode to cache
+                activeSession: newState.activeSession,
+                highScores: newState.highScores,
+                hasCompletedStudyTutorial: newState.hasCompletedStudyTutorial, // Add this
+                timestamp: Date.now()
+            };
+            localStorage.setItem(CACHE_KEY_PREFIX + userId, JSON.stringify(cacheData));
 
-            if (!anyErrors) {
-                const cacheData = {
-                    classes: newState.classes,
-                    schedule: newState.schedule,
-                    studySessions: newState.studySessions,
-                    points: newState.points,
-                    inventory: newState.inventory,
-                    equippedAvatar: newState.equippedAvatar,
-                    isOnboarded: newState.isOnboarded, // Added missing property
-                    isRoleSet: newState.isRoleSet,
-                    sleepSettings: newState.sleepSettings,
-                    activeSession: newState.activeSession,
-                    highScores: newState.highScores,
-                    timestamp: Date.now()
-                };
-                localStorage.setItem(CACHE_KEY_PREFIX + userId, JSON.stringify(cacheData));
-            } else {
-                console.warn('[AppContext] Skipping cache update due to fetch errors.');
-            }
-
-        } catch (error) {
-            console.error('Error loading remote data (critical):', error);
+        } catch (error: any) {
+            console.error('[AppContext] Error loading remote data (critical):', error?.message || error);
+            console.error('[AppContext] Error details:', JSON.stringify(error, Object.getOwnPropertyNames(error || {})));
+            setState(prev => ({ ...prev, connectionError: true }));
 
         } finally {
-            clearTimeout(safetyTimeout);
-            // Ensure loading stops no matter what
+            console.log('[AppContext] loadRemoteData FINISHED. Setting isLoading = false');
             setIsLoading(false);
-
-            // Update lastRefreshed to signal listeners
             if (forceRefresh) {
                 setState(prev => ({ ...prev, lastRefreshed: Date.now() }));
             }
@@ -957,10 +997,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         if (user) {
             console.log('[AppContext] Updating Supabase profile for user:', user.id);
-            const { error } = await supabase.from('profiles').update({
+            const { error } = await supabase.from('profiles').upsert({
+                id: user.id,
                 is_onboarded: true,
                 role: finalRole
-            }).eq('id', user.id);
+            });
 
             if (error) {
                 console.error('[AppContext] Supabase Update Error:', error);
@@ -1190,14 +1231,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
 
     const signOut = async () => {
-        console.log('[AppContext] Signing out...');
+        console.log('[AppContext] Signing out (optimistic)...');
+
+        // 1. Clear Local State & Redirect IMMEDIATELY
+        setState(initialState);
+        setUser(null);
+        setIsLoading(false); // Ensure loading is off
+        lastFetchedUserId.current = null;
+        localStorage.removeItem('study_budy_data');
+
+        // Force router push to ensure navigation happens locally
+        router.push('/dashboard');
+
+        // 2. Call Supabase SignOut in background/late
         try {
             await supabase.auth.signOut();
-            setState(initialState);
-            setUser(null);
-            router.push('/login');
+            console.log('[AppContext] Supabase session ended.');
         } catch (error) {
-            console.error('Error signing out:', error);
+            console.error('[AppContext] Error during Supabase signOut (ignored as local state is cleared):', error);
         }
     };
 
@@ -1237,30 +1288,125 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const deleteAccount = async () => {
         if (!user) return;
         console.log('[AppContext] Deleting account...');
+        setIsLoading(true);
 
         try {
-            // 1. Call RPC function (Server-side deletion of auth.users + cascading data)
-            const { error } = await supabase.rpc('delete_account');
+            const userId = user.id;
+            let hasErrors = false;
 
-            if (error) {
-                console.error('[AppContext] Error deleting account:', error);
-                throw error;
+            // Delete user data from tables in FK-safe order
+            // 1. Delete study sessions
+            const { error: sessionsError } = await supabase
+                .from('study_sessions')
+                .delete()
+                .eq('user_id', userId);
+            if (sessionsError) { console.warn('[AppContext] Error deleting sessions:', sessionsError.message); hasErrors = true; }
+
+            // 2. Delete schedule items
+            const { error: scheduleError } = await supabase
+                .from('schedule_items')
+                .delete()
+                .eq('user_id', userId);
+            if (scheduleError) { console.warn('[AppContext] Error deleting schedule:', scheduleError.message); hasErrors = true; }
+
+            // 3. Delete classes
+            const { error: classesError } = await supabase
+                .from('classes')
+                .delete()
+                .eq('user_id', userId);
+            if (classesError) { console.warn('[AppContext] Error deleting classes:', classesError.message); hasErrors = true; }
+
+            // 4. Delete profile (may fail if RLS blocks DELETE)
+            const { error: profileError } = await supabase
+                .from('profiles')
+                .delete()
+                .eq('id', userId);
+
+            if (profileError) {
+                console.warn('[AppContext] Profile delete failed (expected with RLS), resetting profile instead:', profileError.message);
+                // Fallback: Reset profile fields so re-login triggers onboarding
+                const resetData = {
+                    is_onboarded: false,
+                    role: null,
+                    points: 0,
+                    inventory: [],
+                    equipped_avatar: 'Default Dog',
+                    game_time_bank: 0,
+                    is_premium: false,
+                    has_completed_study_tutorial: false,
+                    tier_legendary_credits: 0,
+                    tier_epic_credits: 0,
+                    tier_rare_credits: 0,
+                    high_scores: {},
+                    study_notes: {}
+                };
+                const { error: resetError } = await supabase
+                    .from('profiles')
+                    .update(resetData)
+                    .eq('id', userId);
+                if (resetError) {
+                    console.error('[AppContext] Profile reset ALSO failed:', resetError.message);
+                    // Last resort: try upsert
+                    const { error: upsertError } = await supabase
+                        .from('profiles')
+                        .upsert({ id: userId, ...resetData });
+                    if (upsertError) {
+                        console.error('[AppContext] Profile upsert ALSO failed:', upsertError.message);
+                    }
+                }
+                // Verify the reset worked
+                const { data: checkProfile } = await supabase
+                    .from('profiles')
+                    .select('is_onboarded')
+                    .eq('id', userId)
+                    .single();
+                if (checkProfile?.is_onboarded) {
+                    console.error('[AppContext] CRITICAL: Profile is_onboarded is still true after reset!');
+                } else {
+                    console.log('[AppContext] Profile successfully reset. is_onboarded:', checkProfile?.is_onboarded);
+                }
             }
 
-            // 2. Clear Local State
-            await signOut(); // This handles state clearing and redirect        
+            if (hasErrors) {
+                console.warn('[AppContext] Some data could not be deleted, but proceeding with sign out.');
+            }
+
+            // 5. Clear Local State & Sign Out
+            // Set a persistent deletion marker BEFORE clearing localStorage
+            // This survives re-login and forces a fresh start
+            const deletionMarker = `account_deleted_${userId}`;
+            localStorage.clear();
+            localStorage.setItem(deletionMarker, 'true');
+            setState(initialState);
+            setUser(null);
+
+            await supabase.auth.signOut();
+            window.location.href = '/login';
         } catch (error) {
             console.error('Failed to delete account:', error);
             alert('Failed to delete account. Please try again.');
+        } finally {
+            setIsLoading(false);
         }
     };
 
-    const startBreak = (durationMinutes: number) => {
+    const startBreak = async (durationMinutes: number) => {
         const endTime = Date.now() + durationMinutes * 60 * 1000;
         setState(prev => ({
             ...prev,
-            breakTimer: { isActive: true, endTime, hasClaimedAd: false }
+            breakTimer: { isActive: true, endTime, hasClaimedAd: false },
+            gameTimeBank: prev.gameTimeBank + durationMinutes
         }));
+
+        // Persist game time to DB
+        if (user) {
+            const { data: profile } = await supabase.from('profiles').select('game_time_bank').eq('id', user.id).single();
+            if (profile) {
+                await supabase.from('profiles').update({
+                    game_time_bank: (profile.game_time_bank || 0) + durationMinutes
+                }).eq('id', user.id);
+            }
+        }
     };
 
     const endBreak = () => {
@@ -1294,6 +1440,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const updateGame4096 = (gameState: AppState['game4096']) => {
         setState(prev => ({ ...prev, game4096: gameState }));
         // Auto-persist to local storage automatically via useEffect hooks
+    };
+
+    const completeTutorial = async () => {
+        setState(prev => ({ ...prev, hasCompletedStudyTutorial: true }));
+        localStorage.setItem('hasCompletedStudyTutorial', 'true');
+
+        if (user) {
+            await supabase.from('profiles').update({ has_completed_study_tutorial: true }).eq('id', user.id).then(({ error }) => {
+                if (error) console.error('Error updating tutorial status:', error);
+            });
+        }
     };
 
     return (
@@ -1359,6 +1516,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                         return next;
                     });
                 },
+                completeTutorial,
                 updateHighScore: (gameId: string, score: number) => {
                     setState(prev => {
                         const currentHigh = prev.highScores[gameId] || 0;
@@ -1381,7 +1539,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                         const { error: insertError } = await supabase.from('game_scores').insert({
                             user_id: user.id,
                             game_id: gameId,
-                            score: score
+                            score: score,
+                            player_name: user.user_metadata?.full_name || state.equippedAvatar || 'Anonymous',
+                            player_avatar: state.equippedAvatar || 'Default Dog'
                         });
 
                         if (insertError) {
@@ -1403,8 +1563,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
                         const rank = (count || 0) + 1;
 
-                        // Only return rank if in top 100
-                        if (rank <= 100) {
+                        // Only return rank if in top 10
+                        if (rank <= 10) {
                             return rank;
                         }
                         return null;

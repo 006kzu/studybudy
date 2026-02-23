@@ -1,9 +1,10 @@
 'use client';
 
 import { useApp } from '@/context/AppContext';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { purchaseItem, restorePurchases } from '@/lib/iap';
 import Link from 'next/link';
+import { supabase } from '@/lib/supabase';
 
 // ...
 import Modal from '@/components/Modal';
@@ -14,9 +15,26 @@ export default function SettingsPage() {
     const [showSemesterModal, setShowSemesterModal] = useState(false);
     const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
     const [showParentalGate, setShowParentalGate] = useState(false);
+    const [leaderboardName, setLeaderboardName] = useState('');
+    const [nameSaving, setNameSaving] = useState(false);
+    const [nameSaved, setNameSaved] = useState(false);
+    const [hasLinkedParent, setHasLinkedParent] = useState(false);
 
-    // Local state for UI feedback before persisting (or direct persist if fast enough)
-    // We'll assume updateSettings persists to Context/LocalStorage
+    // Check if a parent has linked to this student
+    useEffect(() => {
+        const checkLinkedParent = async () => {
+            if (!user) return;
+            const { data } = await supabase
+                .from('profiles')
+                .select('id')
+                .eq('linked_user_id', user.id)
+                .limit(1);
+            if (data && data.length > 0) {
+                setHasLinkedParent(true);
+            }
+        };
+        checkLinkedParent();
+    }, [user]);
 
     const toggleSleep = () => {
         const current = state.sleepSettings || { enabled: false, start: '22:00', end: '06:00' };
@@ -51,7 +69,7 @@ export default function SettingsPage() {
                         <div>
                             <h2 className="text-h2" style={{ color: '#5e4002', margin: 0 }}>Go Premium 💎</h2>
                             <p style={{ margin: '4px 0 0 0', fontSize: '0.9rem', opacity: 0.9 }}>
-                                Remove ads & support the developer.
+                                Remove ads & support the developer. Monthly.
                             </p>
                         </div>
                         <button
@@ -67,7 +85,7 @@ export default function SettingsPage() {
                                 setShowParentalGate(true);
                             }}
                         >
-                            $4.99
+                            $4.99/mo
                         </button>
                     </div>
                 </div>
@@ -103,133 +121,57 @@ export default function SettingsPage() {
                         <span className="slider round"></span>
                     </label>
                 </div>
-
-
-
-                {/* Class Reminders */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 0' }}>
-                    <div>
-                        <div style={{ fontWeight: 600, fontSize: '1rem' }}>Class Reminders</div>
-                        <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
-                            Get notified 15 mins before class.
-                        </div>
-                    </div>
-                    <label className="switch">
-                        <input
-                            type="checkbox"
-                            checked={state.notifications?.classRemindersEnabled ?? false}
-                            onChange={(e) => {
-                                const checked = e.target.checked;
-                                updateSettings({
-                                    notifications: {
-                                        studyBreaksEnabled: state.notifications?.studyBreaksEnabled ?? false,
-                                        classRemindersEnabled: checked
-                                    }
-                                });
-
-                                if (checked) scheduleClassReminders?.(15);
-                                else cancelClassReminders?.();
-                            }}
-                        />
-                        <span className="slider round"></span>
-                    </label>
-                </div>
             </div>
 
-            <div className="card">
-                <h2 className="text-h2">🧘 Zen Mode</h2>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', gap: '16px' }}>
-                    <div>
-                        <div style={{ fontWeight: 600 }}>Focus Mode Guide</div>
-                        <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
-                            Show reminder to use Guided Access.
-                        </div>
-                    </div>
-                    <label className="switch" style={{ flexShrink: 0 }}>
-                        <input
-                            type="checkbox"
-                            checked={state.zenMode ?? false}
-                            onChange={() => updateSettings({ zenMode: !state.zenMode })}
-                        />
-                        <span className="slider round"></span>
-                    </label>
-                </div>
-                {state.zenMode && (
-                    <div style={{ marginTop: '12px', padding: '12px', background: '#f0f9ff', borderRadius: '8px', fontSize: '0.85rem', color: '#005580' }}>
-                        <p style={{ marginBottom: '8px', lineHeight: '1.4' }}>
-                            ℹ️ <strong>How to use:</strong>
-                        </p>
-                        <ol style={{ paddingLeft: '20px', margin: '0 0 12px 0' }}>
-                            <li style={{ marginBottom: '4px' }}>Go to <strong>Settings &gt; Accessibility &gt; Guided Access</strong> and turn it ON.</li>
-                            <li>Open StudyBudy and <strong>Triple-click</strong> the Side Button to lock.</li>
-                        </ol>
-                        <a
-                            href="App-Prefs:root=ACCESSIBILITY"
-                            style={{
-                                display: 'inline-block',
-                                color: '#005580',
-                                textDecoration: 'underline',
-                                fontWeight: 600
-                            }}
-                        >
-                            Open Accessibility Settings →
-                        </a>
-                    </div>
-                )}
-            </div>
-
-            <div className="card">
-                <h2 className="text-h2">😴 Sleep Schedule</h2>
-                <p className="text-body" style={{ marginBottom: '16px' }}>
-                    Hide calendar slots during your sleep hours.
+            <div className="card" style={{ marginTop: '24px' }}>
+                <h2 className="text-h2">🏆 Leaderboard</h2>
+                <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', marginBottom: '12px' }}>
+                    Choose a display name for the leaderboard.
                 </p>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                    <span style={{ fontWeight: 600 }}>Enable Sleep Filter</span>
-                    <label className="switch">
-                        <input
-                            type="checkbox"
-                            checked={state.sleepSettings?.enabled ?? false}
-                            onChange={toggleSleep}
-                        />
-                        <span className="slider round"></span>
-                    </label>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                    <input
+                        type="text"
+                        placeholder={user?.user_metadata?.full_name || 'Enter display name'}
+                        value={leaderboardName}
+                        onChange={e => setLeaderboardName(e.target.value)}
+                        maxLength={20}
+                        style={{
+                            flex: 1,
+                            padding: '10px 12px',
+                            borderRadius: '8px',
+                            border: '1px solid #ddd',
+                            fontSize: '1rem'
+                        }}
+                    />
+                    <button
+                        disabled={nameSaving || !leaderboardName.trim()}
+                        onClick={async () => {
+                            if (!user || !leaderboardName.trim()) return;
+                            setNameSaving(true);
+                            try {
+                                // Update profiles table
+                                const { supabase } = await import('@/lib/supabase');
+                                await supabase.from('profiles').update({
+                                    full_name: leaderboardName.trim()
+                                }).eq('id', user.id);
+                                // Also update existing game_scores
+                                await supabase.from('game_scores').update({
+                                    player_name: leaderboardName.trim()
+                                }).eq('user_id', user.id);
+                                setNameSaved(true);
+                                setTimeout(() => setNameSaved(false), 2000);
+                            } catch (e) {
+                                console.error('Failed to update name:', e);
+                                alert('Failed to save. Try again.');
+                            }
+                            setNameSaving(false);
+                        }}
+                        className="btn btn-primary"
+                        style={{ padding: '10px 20px', fontSize: '0.9rem' }}
+                    >
+                        {nameSaved ? '✓ Saved' : nameSaving ? 'Saving...' : 'Save'}
+                    </button>
                 </div>
-
-                {state.sleepSettings?.enabled && (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                        <div>
-                            <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '4px' }}>Bedtime</label>
-                            <input
-                                type="time"
-                                value={state.sleepSettings?.start || '22:00'}
-                                onChange={(e) => {
-                                    const current = state.sleepSettings || { enabled: false, start: '22:00', end: '06:00' };
-                                    updateSettings({
-                                        sleepSettings: { ...current, start: e.target.value }
-                                    });
-                                }}
-                                className="input"
-                                style={{ width: '100%', padding: '8px' }}
-                            />
-                        </div>
-                        <div>
-                            <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '4px' }}>Wake Up</label>
-                            <input
-                                type="time"
-                                value={state.sleepSettings?.end || '06:00'}
-                                onChange={(e) => {
-                                    const current = state.sleepSettings || { enabled: false, start: '22:00', end: '06:00' };
-                                    updateSettings({
-                                        sleepSettings: { ...current, end: e.target.value }
-                                    });
-                                }}
-                                className="input"
-                                style={{ width: '100%', padding: '8px' }}
-                            />
-                        </div>
-                    </div>
-                )}
             </div>
 
             {
@@ -237,6 +179,7 @@ export default function SettingsPage() {
                     <div className="card" style={{ marginTop: '24px', border: '1px solid #fee2e2', background: '#fff' }}>
                         <h2 className="text-h2" style={{ color: 'var(--color-primary)' }}>👤 Account</h2>
 
+                        {/* Linked Parent Status */}
                         <div style={{ marginBottom: '24px' }}>
                             <p className="text-body" style={{ marginBottom: '8px', fontWeight: 600 }}>Your Student ID</p>
                             <div style={{
@@ -294,6 +237,27 @@ export default function SettingsPage() {
                                 Share this ID (or the link below) with your parent so they can automatically link to your account.
                             </p>
 
+                            {hasLinkedParent && (
+                                <div style={{
+                                    display: 'flex', alignItems: 'center', gap: '10px',
+                                    padding: '12px 16px',
+                                    borderRadius: '12px',
+                                    marginTop: '12px'
+                                }}>
+                                    <div style={{
+                                        width: '24px', height: '24px', borderRadius: '50%',
+                                        background: '#22c55e', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        flexShrink: 0
+                                    }}>
+                                        <span style={{ color: 'white', fontSize: '0.9rem', fontWeight: 'bold' }}>✓</span>
+                                    </div>
+                                    <div>
+                                        <div style={{ fontWeight: 700, color: '#166534', fontSize: '0.95rem' }}>Successfully Linked!</div>
+                                        <div style={{ fontSize: '0.8rem', color: '#15803d' }}>Your parent account is connected</div>
+                                    </div>
+                                </div>
+                            )}
+
                             <button
                                 onClick={() => {
                                     const link = `${window.location.origin}/link?studentId=${user.id}`;
@@ -329,7 +293,6 @@ export default function SettingsPage() {
                             <button
                                 onClick={async () => {
                                     await signOut?.();
-                                    window.location.href = '/login';
                                 }}
                                 className="btn"
                                 style={{
@@ -363,56 +326,7 @@ export default function SettingsPage() {
                 )
             }
 
-            <div className="card" style={{ marginTop: '24px' }}>
-                <h2 className="text-h2">🎓 Semester Management</h2>
-                <p className="text-body" style={{ marginBottom: '16px' }}>
-                    Start fresh for a new semester.
-                </p>
-                <button
-                    onClick={() => setShowSemesterModal(true)}
-                    className="btn"
-                    style={{
-                        width: '100%',
-                        background: 'transparent',
-                        border: '1px solid var(--color-text-secondary)',
-                        color: 'var(--color-text-main)',
-                        opacity: 0.8
-                    }}
-                >
-                    Done with Semester
-                </button>
-            </div>
 
-            {/* Semester Reset Confirmation Modal */}
-            <Modal
-                isOpen={showSemesterModal}
-                onClose={() => setShowSemesterModal(false)}
-                title="End Semester?"
-                type="danger"
-                actions={
-                    <>
-                        <button className="btn btn-secondary" onClick={() => setShowSemesterModal(false)}>Cancel</button>
-                        <button
-                            className="btn"
-                            style={{ background: 'var(--color-primary)', color: 'white' }}
-                            onClick={async () => {
-                                await archiveAllClasses?.(); // Optional chain safe
-                                setShowSemesterModal(false);
-                                alert('Semester ended! Classes archived. Good luck with the next one! 🍀');
-                            }}
-                        >
-                            Archive Classes
-                        </button>
-                    </>
-                }
-            >
-                <p>
-                    This will <strong>archive all current classes</strong> and clear their weekly schedules.
-                </p>
-                <p style={{ marginTop: '12px', fontSize: '0.9rem', color: '#666' }}>
-                    Don't worry, your <strong>stats and history are safe</strong>! You can still see your total study time in the Stats page.
-                </p>
-            </Modal>
 
             {/* Delete Account Confirmation Modal */}
             <Modal
@@ -427,9 +341,7 @@ export default function SettingsPage() {
                             className="btn"
                             style={{ background: '#dc2626', color: 'white' }}
                             onClick={async () => {
-                                if (confirm("Are you absolutely sure? This cannot be undone.")) {
-                                    await deleteAccount?.();
-                                }
+                                await deleteAccount();
                             }}
                         >
                             Confirm Delete

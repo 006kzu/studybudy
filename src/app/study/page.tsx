@@ -12,8 +12,9 @@ import StudyNotesModal from '@/components/StudyNotesModal';
 import ShareProgressModal from '@/components/ShareProgressModal';
 import { initAudio, startLockScreenSession, setLockScreenHandlers, clearLockScreenSession, updateLockScreenProgress } from '@/utils/mediaSession';
 
+
 function StudyPageContent() {
-    const { state, recordSession, user, scheduleStudyNotification, cancelStudyNotification, startBreak, saveActiveSession, clearActiveSession, isLoading } = useApp();
+    const { state, recordSession, user, scheduleStudyNotification, cancelStudyNotification, startBreak, saveActiveSession, clearActiveSession, isLoading, completeTutorial, consumeGameTime } = useApp();
     const searchParams = useSearchParams();
     const router = useRouter();
 
@@ -84,9 +85,13 @@ function StudyPageContent() {
                     // Check for 25m interval (1500 seconds)
                     if (next > 0 && next % 1500 === 0) {
                         setIsActive(false); // Pause timer
-                        // INTERCEPT: Show Notes Modal instead of Break Modal directly
-                        setPendingAction('break');
-                        setShowNotesModal(true);
+                        // Only ask for notes if session > 10 minutes
+                        if (next >= 600) {
+                            setPendingAction('break');
+                            setShowNotesModal(true);
+                        } else {
+                            setShowBreakModal(true);
+                        }
                     }
                     return next;
                 });
@@ -95,7 +100,7 @@ function StudyPageContent() {
         return () => clearInterval(interval);
     }, [isActive, finished, isPlayingGame]);
 
-    // ...
+
 
     const handleNotesComplete = (note?: string) => {
         console.log('[StudyPage] handleNotesComplete called. Note:', note, 'PendingAction:', pendingAction);
@@ -299,6 +304,9 @@ function StudyPageContent() {
 
 
     const [showZenGuide, setShowZenGuide] = useState(false);
+    const [showTutorial, setShowTutorial] = useState(false);
+    const [tutorialPhase, setTutorialPhase] = useState<'countdown' | 'reward' | null>(null);
+    const [tutorialCountdownSeconds, setTutorialCountdownSeconds] = useState(1497); // 24:57
     const [returnToBreak, setReturnToBreak] = useState(false);
     const [showAdUpsell, setShowAdUpsell] = useState(false);
 
@@ -344,15 +352,6 @@ function StudyPageContent() {
         const mins = Math.floor(s / 60);
         const secs = s % 60;
         return `${mins}:${secs.toString().padStart(2, '0')}`;
-    };
-
-    // --- Developer Tools ---
-    const devSetTimeAlmost25 = () => {
-        setSeconds(1495); // 5 seconds before 25m
-    };
-
-    const devSetTimeAlmost2Hours = () => {
-        setSeconds(7195); // 5 seconds before 2 hours (1hr 59m 55s)
     };
 
     // AdMob Effect - Only run if valid class
@@ -416,6 +415,30 @@ function StudyPageContent() {
         }
     }, [isActive]);
 
+    // Check Tutorial Status - Immediately on load
+    useEffect(() => {
+        if (!isLoading && !state.hasCompletedStudyTutorial) {
+            setShowTutorial(true);
+            setTutorialPhase('countdown');
+            setTutorialCountdownSeconds(0); // Start at 0:00, count up fast
+        }
+    }, [isLoading, state.hasCompletedStudyTutorial]);
+
+    // Tutorial Countdown Timer - runs fast to simulate 25 minutes
+    useEffect(() => {
+        if (tutorialPhase !== 'countdown') return;
+        if (tutorialCountdownSeconds >= 1500) {
+            // Reached 25:00! Show reward
+            setTutorialPhase('reward');
+            return;
+        }
+        // Run fast: 100ms per second so 25 minutes = ~2.5 seconds
+        const timer = setTimeout(() => {
+            setTutorialCountdownSeconds(prev => prev + 1);
+        }, 100);
+        return () => clearTimeout(timer);
+    }, [tutorialPhase, tutorialCountdownSeconds]);
+
     // Redirect to dashboard if class is invalid (using useEffect to avoid render-time state update)
     useEffect(() => {
         if (!isLoading && isClassInvalid) {
@@ -427,25 +450,27 @@ function StudyPageContent() {
     if (isLoading) return <div className="container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>Loading Session...</div>;
     if (isClassInvalid) return null; // Redirect is handled by useEffect above
 
-    const handlePlayGame = async () => {
+    const [showGameLoading, setShowGameLoading] = useState(false);
+
+    const handlePlayGame = async (skipAd = false) => {
         setIsActive(false); // Ensure timer is paused
         setShowBreakModal(false); // Close break modal if open
+        setShowGameLoading(true);
 
-        if (isPremium) {
-            setIsPlayingGame(true);
-        } else {
-            // Intercept with Upsell Modal
-            setShowAdUpsell(true);
+        try {
+            if (!state.isPremium && !skipAd) {
+                const { AdMobService } = await import('@/lib/admob');
+                await AdMobService.showInterstitial();
+            }
+        } catch (error) {
+            console.error('Ad failed to show:', error);
         }
-    };
 
-    const handleWatchAdAndPlay = async () => {
-        setShowAdUpsell(false);
-        const { AdMobService } = await import('@/lib/admob');
-        // Show Interstitial (or Reward if forced for game entry)
-        const watched = await AdMobService.showInterstitial();
-        // Redirect to Games Hub
-        router.push('/games');
+        // Brief loading screen before navigating
+        setTimeout(() => {
+            // Use window.location as fallback if router fails, but router.push should work
+            router.push('/games');
+        }, 1500);
     };
 
     const handleUpgradeAndPlay = async () => {
@@ -730,21 +755,8 @@ function StudyPageContent() {
             </div>
             {/* Ad Banner Placeholder Removed per user request */}
 
-            {/* Dev Tools (Centered for Testing) */}
-            <div style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', opacity: 1, zIndex: 100, display: 'flex', gap: '12px', background: 'rgba(0,0,0,0.5)', padding: '12px', borderRadius: '12px' }}>
-                <button
-                    onClick={devSetTimeAlmost25}
-                    style={{ background: 'red', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '0.7rem', border: 'none' }}
-                >
-                    ⏩ FF 25m
-                </button>
-                <button
-                    onClick={devSetTimeAlmost2Hours}
-                    style={{ background: 'purple', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '0.7rem', border: 'none' }}
-                >
-                    ⏩ FF 2hr
-                </button>
-            </div>
+
+
 
             {/* Modals */}
             <StudyNotesModal
@@ -777,35 +789,37 @@ function StudyPageContent() {
                 Want to play a quick game to relax?
             </Modal>
 
-            {/* Pre-Ad Upsell Modal (New) */}
-            <Modal
-                isOpen={showAdUpsell}
-                onClose={() => setShowAdUpsell(false)} // Or Go Back?
-                title="Strict Mode? 💎"
-                // Using a placeholder title or "Upgrade to Premium"
-                actions={
-                    <>
-                        <button className="btn btn-secondary" onClick={handleWatchAdAndPlay}>
-                            Watch Ad & Play 📺
-                        </button>
-                        <button className="btn btn-primary" onClick={handleUpgradeAndPlay}>
-                            Upgrade Now ($4.99) 🚀
-                        </button>
-                    </>
-                }
-            >
-                <div style={{ textAlign: 'center', padding: '12px' }}>
-                    <p style={{ fontSize: '1.1rem', fontWeight: 600, color: '#2c3e50', marginBottom: '16px' }}>
-                        Keep the momentum.
-                    </p>
-                    <p style={{ marginBottom: '24px', color: '#555' }}>
-                        Remove ads and get to your break faster.
-                    </p>
-                    <div style={{ fontSize: '0.85rem', color: '#888' }}>
-                        One-time purchase. No subscriptions.
-                    </div>
+            {/* Game Loading Screen */}
+            {showGameLoading && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    width: '100vw',
+                    height: '100vh',
+                    background: 'linear-gradient(135deg, #FF7E36, #E84545)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 10000,
+                    color: 'white'
+                }}>
+                    <img
+                        src={userAvatarSrc}
+                        alt="Loading"
+                        style={{
+                            width: '120px',
+                            height: '120px',
+                            objectFit: 'contain',
+                            imageRendering: 'pixelated',
+                            animation: 'pulse 1.5s ease-in-out infinite'
+                        }}
+                    />
+                    <h2 style={{ marginTop: '24px', fontSize: '1.5rem', fontWeight: 700 }}>Loading Games...</h2>
+                    <p style={{ opacity: 0.8, marginTop: '8px' }}>Get ready to play! 🎮</p>
                 </div>
-            </Modal>
+            )}
 
             {/* Premium Offer Modal */}
             <Modal
@@ -827,7 +841,7 @@ function StudyPageContent() {
                                 setShowPremiumModal(false);
                                 // Hiding banner handled by useEffect
                             }
-                        }}>Upgrade ($4.99)</button>
+                        }}>Upgrade ($4.99/mo)</button>
                     </>
                 }
             >
@@ -842,7 +856,7 @@ function StudyPageContent() {
                         <li>❤️ Support future development</li>
                     </ul>
                     <p style={{ color: '#27ae60', fontWeight: 'bold' }}>
-                        One-time purchase. Forever yours.
+                        Monthly subscription. Cancel anytime.
                     </p>
                 </div>
             </Modal>
@@ -938,6 +952,175 @@ function StudyPageContent() {
                     </div>
                 )
             }
+            {/* Tutorial Countdown Overlay */}
+            {showTutorial && tutorialPhase === 'countdown' && (
+                <div style={{
+                    position: 'fixed',
+                    inset: 0,
+                    zIndex: 9999,
+                    background: 'linear-gradient(180deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'white',
+                    padding: '24px'
+                }}>
+                    {/* TUTORIAL badge */}
+                    <div style={{
+                        background: 'linear-gradient(135deg, #FF7E36, #E84545)',
+                        color: 'white',
+                        fontWeight: 900,
+                        fontSize: '0.75rem',
+                        letterSpacing: '3px',
+                        textTransform: 'uppercase',
+                        padding: '6px 18px',
+                        borderRadius: '20px',
+                        marginBottom: '24px',
+                        boxShadow: '0 4px 16px rgba(232,69,69,0.4)',
+                        animation: 'tutorialPulse 1.5s ease-in-out infinite'
+                    }}>
+                        ✦ Tutorial ✦
+                    </div>
+
+                    {/* Explanation */}
+                    <p style={{
+                        fontSize: '1rem',
+                        opacity: 0.85,
+                        marginBottom: '8px',
+                        textAlign: 'center',
+                        maxWidth: '280px',
+                        lineHeight: 1.5
+                    }}>
+                        Watch how the <strong>Study Timer</strong> works — it counts up to 25 minutes
+                    </p>
+
+                    {/* Timer */}
+                    <div style={{
+                        fontSize: tutorialCountdownSeconds >= 1490 ? '5.5rem' : '4.5rem',
+                        fontFamily: 'monospace',
+                        fontWeight: 'bold',
+                        transition: 'all 0.15s ease',
+                        transform: tutorialCountdownSeconds >= 1490 ? 'scale(1.12)' : 'scale(1)',
+                        color: tutorialCountdownSeconds >= 1499 ? '#FF7E36' : tutorialCountdownSeconds >= 1490 ? '#FFD700' : '#fff',
+                        textShadow: tutorialCountdownSeconds >= 1490 ? '0 0 30px rgba(255,126,54,0.7)' : 'none',
+                        marginTop: '12px'
+                    }}>
+                        {Math.floor(tutorialCountdownSeconds / 60).toString().padStart(2, '0')}:{(tutorialCountdownSeconds % 60).toString().padStart(2, '0')}
+                    </div>
+
+                    {/* Progress bar */}
+                    <div style={{
+                        width: '80%',
+                        maxWidth: '300px',
+                        height: '8px',
+                        background: 'rgba(255,255,255,0.1)',
+                        borderRadius: '4px',
+                        marginTop: '24px',
+                        overflow: 'hidden'
+                    }}>
+                        <div style={{
+                            width: `${(tutorialCountdownSeconds / 1500) * 100}%`,
+                            height: '100%',
+                            background: 'linear-gradient(90deg, #FF7E36, #E84545)',
+                            borderRadius: '4px',
+                            transition: 'width 0.08s linear'
+                        }} />
+                    </div>
+
+                    <p style={{ marginTop: '16px', opacity: 0.45, fontSize: '0.8rem' }}>
+                        ⏳ Simulating 25 minutes...
+                    </p>
+
+                    {/* Skip button */}
+                    <button
+                        onClick={() => {
+                            setTutorialCountdownSeconds(1500);
+                        }}
+                        style={{
+                            marginTop: '32px',
+                            background: 'transparent',
+                            border: '1px solid rgba(255,255,255,0.25)',
+                            color: 'rgba(255,255,255,0.5)',
+                            padding: '8px 24px',
+                            borderRadius: '20px',
+                            fontSize: '0.85rem',
+                            cursor: 'pointer'
+                        }}
+                    >
+                        Skip Tutorial
+                    </button>
+
+                    <style jsx>{`
+                        @keyframes tutorialPulse {
+                            0%, 100% { opacity: 1; transform: scale(1); }
+                            50% { opacity: 0.85; transform: scale(0.97); }
+                        }
+                    `}</style>
+                </div>
+            )}
+
+            {/* Tutorial Reward Modal */}
+            {showTutorial && tutorialPhase === 'reward' && (
+                <div style={{
+                    position: 'fixed',
+                    inset: 0,
+                    zIndex: 9999,
+                    background: 'linear-gradient(180deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'white'
+                }}>
+                    <div style={{
+                        fontSize: '5rem',
+                        fontFamily: 'monospace',
+                        fontWeight: 'bold',
+                        color: '#2ecc71',
+                        textShadow: '0 0 40px rgba(46,204,113,0.5)',
+                        marginBottom: '16px'
+                    }}>
+                        25:00 🎉
+                    </div>
+                    <div style={{
+                        background: 'rgba(255,255,255,0.1)',
+                        borderRadius: '24px',
+                        padding: '32px 28px',
+                        maxWidth: '340px',
+                        textAlign: 'center',
+                        backdropFilter: 'blur(10px)'
+                    }}>
+                        <p style={{ fontSize: '1.15rem', lineHeight: 1.6, marginBottom: '24px' }}>
+                            After 25 minutes in study mode, you earn <strong style={{ color: '#FFD700' }}>5 minutes</strong> in the game hub! Try the games out!
+                        </p>
+                        <button
+                            className="btn"
+                            style={{
+                                background: 'linear-gradient(135deg, #FF7E36, #E84545)',
+                                color: 'white',
+                                border: 'none',
+                                padding: '14px 32px',
+                                fontSize: '1.1rem',
+                                fontWeight: 'bold',
+                                borderRadius: '16px',
+                                cursor: 'pointer',
+                                boxShadow: '0 4px 20px rgba(232,69,69,0.4)',
+                                width: '100%'
+                            }}
+                            onClick={async () => {
+                                completeTutorial();
+                                await consumeGameTime(-5);
+                                setShowTutorial(false);
+                                setTutorialPhase(null);
+                                handlePlayGame(true);
+                            }}
+                        >
+                            Play Game! 🎮
+                        </button>
+                    </div>
+                </div>
+            )}
         </main >
     );
 }

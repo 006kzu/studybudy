@@ -2,7 +2,8 @@
 
 import { useApp } from '@/context/AppContext';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useState, useRef } from 'react';
 import WienerAvatar from '@/components/WienerAvatar';
 import { AVATARS } from '@/constants/avatars';
 import Modal from '@/components/Modal';
@@ -12,10 +13,13 @@ import { supabase } from '@/lib/supabase';
 
 export default function ShopPage() {
     const { state, buyItem, redeemCharacterCredit, equipAvatar, user } = useApp();
+    const router = useRouter();
     const [toastMsg, setToastMsg] = useState<{ msg: string, type: 'error' | 'success' } | null>(null);
     const [selectedItem, setSelectedItem] = useState<{ name: string, price: number, filename: string } | null>(null);
     const [successModalOpen, setSuccessModalOpen] = useState(false);
     const [unlockedItem, setUnlockedItem] = useState<{ name: string, filename: string } | null>(null);
+    const [previewItem, setPreviewItem] = useState<{ name: string, filename: string } | null>(null);
+    const scrollRef = useRef(0);
 
     // Filter out "Default Dog" if you don't want to sell it (it's price 0, implies owned)
     // Or keep it to show "Equipped"
@@ -46,6 +50,7 @@ export default function ShopPage() {
             setToastMsg({ msg: `Equipped ${item.name}!`, type: 'success' });
         } else {
             // Check for cash purchase option (always open modal now)
+            scrollRef.current = window.scrollY;
             setSelectedItem(item);
         }
     };
@@ -66,66 +71,42 @@ export default function ShopPage() {
 
     return (
         <main className="container" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 16px)' }}>
-            <div style={{ marginBottom: '16px' }}>
-                <Link href="/dashboard" style={{ textDecoration: 'none', color: 'var(--color-text-secondary)', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    ← Back to Dashboard
-                </Link>
-            </div>
-
-            {/* Credit Wallet Display */}
-            {(state.characterCredits.legendary > 0 || state.characterCredits.epic > 0 || state.characterCredits.rare > 0) && (
-                <div className="animate-fade-in" style={{
-                    background: 'linear-gradient(135deg, #f43f5e 0%, #fb923c 100%)',
+            <header style={{ marginBottom: '24px', textAlign: 'center', position: 'relative' }}>
+                <button
+                    onClick={() => router.back()}
+                    style={{
+                        position: 'absolute',
+                        left: '0',
+                        top: '0',
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        fontSize: '1.5rem',
+                        color: '#333',
+                        padding: 0
+                    }}
+                >
+                    ←
+                </button>
+                <h1 style={{
+                    fontSize: '2rem',
+                    margin: '0 auto',
+                    background: 'linear-gradient(135deg, #FF7E36, #E84545)',
                     color: 'white',
-                    padding: '16px',
-                    borderRadius: '16px',
-                    marginBottom: '24px',
-                    boxShadow: '0 4px 6px -1px rgba(249, 115, 22, 0.2)'
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '12px',
+                    borderRadius: '24px',
+                    padding: '12px 24px',
+                    width: 'fit-content',
+                    boxShadow: '0 4px 12px rgba(232, 69, 69, 0.3)'
                 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                        <span style={{ fontSize: '1.2rem' }}>🎟️</span>
-                        <div style={{ fontWeight: 700, fontSize: '1rem' }}>Your Gift Credits</div>
-                    </div>
-                    <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                        {state.characterCredits.legendary > 0 && (
-                            <div style={{
-                                background: 'rgba(255,255,255,0.2)', padding: '6px 12px', borderRadius: '8px', fontSize: '0.9rem', fontWeight: 700,
-                                display: 'flex', alignItems: 'center'
-                            }}>
-                                <img src="/assets/avatar_dragon.png" alt="Legendary" style={{ width: '24px', height: '24px', objectFit: 'contain', marginRight: '8px' }} />
-                                {state.characterCredits.legendary} Legendary
-                            </div>
-                        )}
-                        {state.characterCredits.epic > 0 && (
-                            <div style={{
-                                background: 'rgba(255,255,255,0.2)', padding: '6px 12px', borderRadius: '8px', fontSize: '0.9rem', fontWeight: 700,
-                                display: 'flex', alignItems: 'center'
-                            }}>
-                                <img src="/assets/avatar_lion.png" alt="Epic" style={{ width: '24px', height: '24px', objectFit: 'contain', marginRight: '8px' }} />
-                                {state.characterCredits.epic} Epic
-                            </div>
-                        )}
-                        {state.characterCredits.rare > 0 && (
-                            <div style={{
-                                background: 'rgba(255,255,255,0.2)', padding: '6px 12px', borderRadius: '8px', fontSize: '0.9rem', fontWeight: 700,
-                                display: 'flex', alignItems: 'center'
-                            }}>
-                                <img src="/assets/avatar_fox.png" alt="Rare" style={{ width: '24px', height: '24px', objectFit: 'contain', marginRight: '8px' }} />
-                                {state.characterCredits.rare} Rare
-                            </div>
-                        )}
-                    </div>
-                </div>
-            )}
+                    <img src="/icons/icon_store.png" alt="Shop" style={{ width: '80px', height: '80px' }} />
+                    Pet Shop
+                </h1>
 
-            <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-                <div>
-                    <h1 className="text-h1" style={{ marginBottom: '4px' }}>Pet Shop</h1>
-                    <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.9rem' }}>
-                        Collection: <strong>{ownedCount}</strong> / {totalCount}
-                    </p>
-                </div>
-                <WienerAvatar points={state.points} inventory={state.inventory} equippedAvatar={state.equippedAvatar} />
+                <p style={{ color: '#888', marginTop: '8px' }}>Collection: {ownedCount} / {totalCount}</p>
             </header>
 
             {/* Bank Section Removed - Replaced with Direct Avatar Purchase */}
@@ -174,7 +155,12 @@ export default function ShopPage() {
                                 </div>
                             )}
 
-                            <div style={{ height: '80px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '8px', marginTop: '12px' }}>
+                            <div style={{ height: '80px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '8px', marginTop: '12px' }}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (isOwned) setPreviewItem({ name: item.name, filename: item.filename });
+                                }}
+                            >
                                 <img
                                     src={item.filename}
                                     alt={item.name}
@@ -183,7 +169,8 @@ export default function ShopPage() {
                                         maxHeight: '100%',
                                         objectFit: 'contain',
                                         imageRendering: 'pixelated',
-                                        filter: !isOwned ? 'brightness(0) opacity(0.5)' : 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))'
+                                        filter: !isOwned ? 'brightness(0) opacity(0.5)' : 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))',
+                                        cursor: isOwned ? 'zoom-in' : 'default'
                                     }}
                                 />
                             </div>
@@ -329,19 +316,18 @@ export default function ShopPage() {
                                 <button
                                     className="btn"
                                     style={{
-                                        background: 'white',
-                                        color: selectedCategory.color, // Theme color
-                                        border: `2px solid ${selectedCategory.color}20`, // Light border
+                                        background: '#000000', // Apple Black
+                                        color: 'white',
                                         padding: '16px',
-                                        borderRadius: '16px',
+                                        borderRadius: '40px', // Pill shape
                                         fontWeight: 700,
                                         fontSize: '1rem',
                                         display: 'flex',
-                                        justifyContent: 'space-between',
+                                        justifyContent: 'center',
                                         alignItems: 'center',
-                                        paddingLeft: '24px',
-                                        paddingRight: '24px',
-                                        marginTop: '4px'
+                                        gap: '8px',
+                                        marginTop: '4px',
+                                        boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
                                     }}
                                     onClick={async () => {
                                         // Direct Purchase Logic (No Parental Gate)
@@ -370,7 +356,7 @@ export default function ShopPage() {
                                     }}
                                 >
                                     <span>Buy Instantly</span>
-                                    <span>{selectedCategory.cost}</span>
+                                    <span style={{ fontWeight: 400, opacity: 0.9 }}>{selectedCategory.cost}</span>
                                 </button>
                             )}
 
@@ -492,6 +478,45 @@ export default function ShopPage() {
                     </div>
                 )}
             </Modal>
+
+            {/* Character Preview Overlay */}
+            {previewItem && (
+                <div
+                    onClick={() => setPreviewItem(null)}
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        zIndex: 9999,
+                        background: 'rgba(0,0,0,0.8)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'zoom-out'
+                    }}
+                >
+                    <img
+                        src={previewItem.filename}
+                        alt={previewItem.name}
+                        style={{
+                            width: '280px',
+                            height: '280px',
+                            objectFit: 'contain',
+                            imageRendering: 'pixelated',
+                            filter: 'drop-shadow(0 8px 32px rgba(255,255,255,0.15))',
+                            animation: 'previewPop 0.3s ease-out'
+                        }}
+                    />
+                    <p style={{ color: 'white', fontSize: '1.4rem', fontWeight: 700, marginTop: '24px' }}>{previewItem.name}</p>
+                    <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.9rem', marginTop: '12px' }}>Tap anywhere to close</p>
+                    <style jsx>{`
+                        @keyframes previewPop {
+                            from { transform: scale(0.5); opacity: 0; }
+                            to { transform: scale(1); opacity: 1; }
+                        }
+                    `}</style>
+                </div>
+            )}
         </main >
     );
 }

@@ -164,3 +164,53 @@ a {
     transform: translateY(0);
   }
 }
+
+/* ============================================
+   Tablet / iPad Responsive Breakpoint
+   Applies only on screens 768px wide and up.
+   Phone styles above are completely unchanged.
+   ============================================ */
+@media (min-width: 768px) {
+  :root {
+    /* Scale up spacing tokens */
+    --spacing-md: 20px;
+    --spacing-lg: 32px;
+    --spacing-xl: 48px;
+  }
+
+  .container {
+    max-width: 780px;      /* Wider content area on iPad */
+    padding: 24px 32px;    /* More breathing room on the sides */
+  }
+
+  .card {
+    padding: 28px 32px;    /* Roomier cards */
+    border-radius: 20px;
+  }
+
+  .text-h1 {
+    font-size: 2.5rem;
+  }
+
+  .text-h2 {
+    font-size: 1.85rem;
+  }
+
+  .text-body {
+    font-size: 1.05rem;
+    line-height: 1.6;
+  }
+
+  .btn {
+    padding: 14px 32px;
+    font-size: 1.05rem;
+  }
+}
+
+/* Large iPad Pro (1024px+) — give it even more space */
+@media (min-width: 1024px) {
+  .container {
+    max-width: 900px;
+    padding: 32px 48px;
+  }
+}

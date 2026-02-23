@@ -18,6 +18,8 @@ const MOVE_SPEED = 0.2; // Lerp factor
 export default function CrossyRoadPage() {
     const { state, extendBreak, isLoading, updateHighScore, submitGameScore } = useApp();
     const router = useRouter();
+    const studyClassId = state.activeSession?.classId;
+    const studyPath = studyClassId ? `/study?classId=${studyClassId}` : '/dashboard';
     const [isNewRecord, setIsNewRecord] = useState(false);
     const [leaderboardRank, setLeaderboardRank] = useState<number | null>(null);
 
@@ -584,7 +586,7 @@ export default function CrossyRoadPage() {
                         onWatchAd={async () => {
                             await extendBreak(1);
                         }}
-                        onExit={() => router.push('/study')}
+                        onExit={() => router.push(studyPath)}
                     />
                 ) : (
                     <GameOverModal

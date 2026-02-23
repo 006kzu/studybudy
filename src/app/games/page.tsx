@@ -8,9 +8,12 @@ import { AdMobService } from '@/lib/admob';
 import { BreakEndedModal } from '@/components/games/BreakEndedModal';
 
 export default function GameHubPage() {
-    const { state, isLoading } = useApp(); // extendBreak removed if not needed, or used for Ad reward
+    const { state, isLoading } = useApp();
     const router = useRouter();
     const [showBreakModal, setShowBreakModal] = useState(false);
+
+    const studyClassId = state.activeSession?.classId;
+    const studyPath = studyClassId ? `/study?classId=${studyClassId}` : '/dashboard';
 
     const userAvatarItem = AVATARS.find(a => a.name === state.equippedAvatar);
     const userAvatarSrc = userAvatarItem ? userAvatarItem.filename : '/assets/idle.png';
@@ -45,6 +48,42 @@ export default function GameHubPage() {
         }
     ];
 
+    // Prepare Interstitial on Mount
+    useEffect(() => {
+        if (!state.isPremium) {
+            AdMobService.prepareInterstitial();
+
+            // Check if an ad is pending (set by games layout every 5 mins)
+            const adPending = sessionStorage.getItem('ad_pending');
+            if (adPending === 'true') {
+                sessionStorage.removeItem('ad_pending');
+                AdMobService.showInterstitial().then(() => {
+                    AdMobService.prepareInterstitial();
+                }).catch(console.error);
+            }
+        }
+    }, [state.isPremium]);
+
+    const handleGameClick = async (path: string) => {
+        if (gameTime <= 0) {
+            setShowBreakModal(true);
+            return;
+        }
+
+        if (!state.isPremium) {
+            try {
+                // Show Ad if ready
+                await AdMobService.showInterstitial();
+                // Prepare next one
+                AdMobService.prepareInterstitial();
+            } catch (e) {
+                console.error("Ad failed", e);
+            }
+        }
+
+        router.push(path);
+    };
+
     if (isLoading) return <div style={{ minHeight: '100vh', background: '#f5f5f5' }} />;
 
     const gameTime = state.gameTimeBank || 0;
@@ -53,7 +92,7 @@ export default function GameHubPage() {
         <main className="container" style={{ padding: '24px', paddingTop: 'calc(env(safe-area-inset-top) + 24px)' }}>
             <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '32px' }}>
                 <div style={{ display: 'flex', alignItems: 'center' }}>
-                    <button onClick={() => router.push('/study')} className="btn" style={{ background: '#f0f0f0', color: '#333', padding: '8px 16px', marginRight: '16px', fontSize: '0.9rem', borderRadius: '12px', fontWeight: 'bold' }}>
+                    <button onClick={() => router.push(studyPath)} className="btn" style={{ background: '#f0f0f0', color: '#333', padding: '8px 16px', marginRight: '16px', fontSize: '0.9rem', borderRadius: '12px', fontWeight: 'bold' }}>
                         ← Back to Studying
                     </button>
                     <h1 className="text-h1" style={{ margin: 0 }}>Game Hub</h1>
@@ -95,13 +134,7 @@ export default function GameHubPage() {
                     <div
                         key={game.id}
                         className="card"
-                        onClick={() => {
-                            if (gameTime <= 0) {
-                                setShowBreakModal(true);
-                                return;
-                            }
-                            router.push(game.path);
-                        }}
+                        onClick={() => handleGameClick(game.path)}
                         style={{
                             display: 'flex',
                             alignItems: 'center',
@@ -131,7 +164,7 @@ export default function GameHubPage() {
                         title="Out of Game Time!"
                         message="You've used all your game time! Study more to earn more time."
                         onWatchAd={() => { }}
-                        onExit={() => router.push('/study')}
+                        onExit={() => router.push(studyPath)}
                     />
                 )
             }

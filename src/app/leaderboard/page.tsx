@@ -10,6 +10,7 @@ type GameScore = {
     score: number;
     avatar: string;
     rank: number;
+    userId: string;
 };
 
 type GameTab = '2048' | 'crossy-road' | 'flappy-bird';
@@ -33,14 +34,21 @@ export default function LeaderboardPage() {
     const [activeTab, setActiveTab] = useState<GameTab>('2048');
     const [scores, setScores] = useState<GameScore[]>([]);
     const [loading, setLoading] = useState(true);
+    const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+
+    useEffect(() => {
+        supabase.auth.getUser().then(({ data }) => {
+            setCurrentUserId(data?.user?.id ?? null);
+        });
+    }, []);
 
     const fetchLeaderboard = async () => {
         setLoading(true);
         try {
-            // Get top 100 scores for the game
+            // Get top 100 scores with player info denormalized in game_scores
             const { data: scoreData, error: scoreError } = await supabase
                 .from('game_scores')
-                .select('user_id, score')
+                .select('user_id, score, player_name, player_avatar')
                 .eq('game_id', activeTab)
                 .order('score', { ascending: false })
                 .limit(100);
@@ -52,34 +60,14 @@ export default function LeaderboardPage() {
                 return;
             }
 
-            // Get unique user IDs
-            const userIds = [...new Set(scoreData.map(s => s.user_id))];
-
-            // Fetch profile data for those users
-            const { data: profiles, error: profileError } = await supabase
-                .from('profiles')
-                .select('id, display_name, equipped_avatar')
-                .in('id', userIds);
-
-            if (profileError) {
-                console.warn('Error fetching profiles:', profileError);
-            }
-
-            // Create profile map
-            const profileMap: Record<string, { display_name?: string; equipped_avatar?: string }> = {};
-            profiles?.forEach(p => {
-                profileMap[p.id] = { display_name: p.display_name, equipped_avatar: p.equipped_avatar };
-            });
-
-            // Format the data
+            // Format the data — read name directly from game_scores
             const formatted: GameScore[] = scoreData.map((s, idx) => {
-                const profile = profileMap[s.user_id];
-                const displayName = profile?.display_name || `Budy #${s.user_id.slice(0, 4).toUpperCase()}`;
                 return {
-                    username: displayName,
+                    username: s.player_name || `Budy #${s.user_id.slice(0, 4).toUpperCase()}`,
                     score: s.score,
-                    avatar: profile?.equipped_avatar || 'Default Dog',
-                    rank: idx + 1
+                    avatar: s.player_avatar || 'Default Dog',
+                    rank: idx + 1,
+                    userId: s.user_id
                 };
             });
 
@@ -140,7 +128,7 @@ export default function LeaderboardPage() {
                 <h1 style={{
                     fontSize: '2rem',
                     margin: '0 auto',
-                    background: 'linear-gradient(135deg, #ffd700, #ff6b6b)',
+                    background: 'linear-gradient(135deg, #FF7E36, #E84545)',
                     color: 'white',
                     display: 'flex',
                     alignItems: 'center',
@@ -149,7 +137,7 @@ export default function LeaderboardPage() {
                     borderRadius: '24px',
                     padding: '12px 24px',
                     width: 'fit-content',
-                    boxShadow: '0 4px 12px rgba(255, 107, 107, 0.3)'
+                    boxShadow: '0 4px 12px rgba(14, 131, 136, 0.2)'
                 }}>
                     <img src="/icons/leaderboard.png" alt="Leaderboard" style={{ width: '80px', height: '80px' }} />
                     Leaderboard
@@ -208,47 +196,56 @@ export default function LeaderboardPage() {
                     </div>
                 ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        {scores.map((entry, index) => (
-                            <div
-                                key={`${entry.rank}-${entry.username}`}
-                                style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    padding: '12px 16px',
-                                    borderRadius: '12px',
-                                    ...getRankStyle(index),
-                                    border: index < 3 ? 'none' : '1px solid #333'
-                                }}
-                            >
-                                <span style={{
-                                    fontSize: '1.2rem',
-                                    fontWeight: 'bold',
-                                    width: '40px',
-                                    textAlign: 'center'
-                                }}>
-                                    {index < 3 ? ['🥇', '🥈', '🥉'][index] : `#${index + 1}`}
-                                </span>
-                                <div style={{ fontSize: '1.8rem', marginRight: '12px' }}>
-                                    {getAvatarEmoji(entry.avatar)}
-                                </div>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                    <p style={{
+                        {scores.map((entry, index) => {
+                            const isCurrentUser = currentUserId && entry.userId === currentUserId;
+                            return (
+                                <div
+                                    key={`${entry.rank}-${entry.username}`}
+                                    style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        padding: '12px 16px',
+                                        borderRadius: '12px',
+                                        ...getRankStyle(index),
+                                        border: isCurrentUser
+                                            ? '2px solid #ffd700'
+                                            : index < 3 ? 'none' : '1px solid #333',
+                                        boxShadow: isCurrentUser
+                                            ? '0 0 14px rgba(255, 215, 0, 0.7), inset 0 0 8px rgba(255, 215, 0, 0.1)'
+                                            : 'none',
+                                        transition: 'box-shadow 0.3s'
+                                    }}
+                                >
+                                    <span style={{
+                                        fontSize: '1.2rem',
                                         fontWeight: 'bold',
-                                        margin: 0,
-                                        overflow: 'hidden',
-                                        textOverflow: 'ellipsis',
-                                        whiteSpace: 'nowrap'
-                                    }}>{entry.username}</p>
+                                        width: '40px',
+                                        textAlign: 'center'
+                                    }}>
+                                        {index < 3 ? ['🥇', '🥈', '🥉'][index] : `#${index + 1}`}
+                                    </span>
+                                    <div style={{ fontSize: '1.8rem', marginRight: '12px' }}>
+                                        {getAvatarEmoji(entry.avatar)}
+                                    </div>
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                        <p style={{
+                                            fontWeight: 'bold',
+                                            margin: 0,
+                                            overflow: 'hidden',
+                                            textOverflow: 'ellipsis',
+                                            whiteSpace: 'nowrap'
+                                        }}>{entry.username}</p>
+                                    </div>
+                                    <div style={{
+                                        fontWeight: 'bold',
+                                        fontSize: '1.2rem',
+                                        color: index < 3 ? 'inherit' : '#ffd700'
+                                    }}>
+                                        {entry.score.toLocaleString()}
+                                    </div>
                                 </div>
-                                <div style={{
-                                    fontWeight: 'bold',
-                                    fontSize: '1.2rem',
-                                    color: index < 3 ? 'inherit' : '#ffd700'
-                                }}>
-                                    {entry.score.toLocaleString()}
-                                </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 )}
             </div>

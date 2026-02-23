@@ -17,6 +17,8 @@ const CELL_SIZE = 70; // approximate, for styling references if needed
 export default function Game2048Page() {
     const { state, updateGame4096, extendBreak, isLoading, updateHighScore, submitGameScore } = useApp();
     const router = useRouter();
+    const studyClassId = state.activeSession?.classId;
+    const studyPath = studyClassId ? `/study?classId=${studyClassId}` : '/dashboard';
     const [points, setPoints] = useState(0);
     const [isNewRecord, setIsNewRecord] = useState(false);
     const [leaderboardRank, setLeaderboardRank] = useState<number | null>(null);
@@ -406,7 +408,7 @@ export default function Game2048Page() {
                         onWatchAd={async () => {
                             await extendBreak(1);
                         }}
-                        onExit={() => router.push('/study')}
+                        onExit={() => router.push(studyPath)}
                     />
                 ) : gameOver && (
                     <GameOverModal
