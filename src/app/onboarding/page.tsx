@@ -315,108 +315,107 @@ function OnboardingContent() {
                 </div>
             )}
 
-            {step > 0 && (
-                step === 1 ? (
-                    <>
-                        <h1 className="text-h1 text-center">{editClassId ? 'Edit Subject' : 'Subject Details'}</h1>
+            {step > 0 && step === 1 && (
+                <>
+                    <h1 className="text-h1 text-center">{editClassId ? 'Edit Subject' : 'Subject Details'}</h1>
 
-                        <div style={{ maxWidth: '500px', margin: '0 auto 20px' }}>
-                            <label className="text-body" style={{ display: 'block', marginBottom: '8px' }}>Subject Name</label>
-                            <input
-                                type="text"
-                                value={className}
-                                onChange={(e) => setClassName(e.target.value)}
-                                placeholder="e.g. Biology 101"
-                                className="input"
-                                style={{ width: '100%', padding: '12px', fontSize: '1rem', border: '1px solid #ddd', borderRadius: '8px', marginBottom: '16px' }}
-                            />
+                    <div style={{ maxWidth: '500px', margin: '0 auto 20px' }}>
+                        <label className="text-body" style={{ display: 'block', marginBottom: '8px' }}>Subject Name</label>
+                        <input
+                            type="text"
+                            value={className}
+                            onChange={(e) => setClassName(e.target.value)}
+                            placeholder="e.g. Biology 101"
+                            className="input"
+                            style={{ width: '100%', padding: '12px', fontSize: '1rem', border: '1px solid #ddd', borderRadius: '8px', marginBottom: '16px' }}
+                        />
 
-                            <label className="text-body" style={{ display: 'block', marginBottom: '8px' }}>Weekly Study Goal (Hours)</label>
-                            <input
-                                type="number"
-                                value={durationGoal}
-                                onChange={(e) => setDurationGoal(Number(e.target.value))}
-                                min="1"
-                                max="20"
-                                className="input"
-                                style={{ width: '100%', padding: '12px', fontSize: '1rem', border: '1px solid #ddd', borderRadius: '8px', marginBottom: '16px' }}
-                            />
+                        <label className="text-body" style={{ display: 'block', marginBottom: '8px' }}>Weekly Study Goal (Hours)</label>
+                        <input
+                            type="number"
+                            value={durationGoal}
+                            onChange={(e) => setDurationGoal(Number(e.target.value))}
+                            min="1"
+                            max="20"
+                            className="input"
+                            style={{ width: '100%', padding: '12px', fontSize: '1rem', border: '1px solid #ddd', borderRadius: '8px', marginBottom: '16px' }}
+                        />
 
-                            <label className="text-body" style={{ display: 'block', marginBottom: '8px' }}>Color Code</label>
-                            <div style={{ display: 'flex', gap: '12px' }}>
-                                {CLASS_COLORS.map((c) => (
-                                    <div
-                                        key={c}
-                                        onClick={() => setColor(c)}
-                                        style={{
-                                            width: '40px',
-                                            height: '40px',
-                                            borderRadius: '50%',
-                                            backgroundColor: c,
-                                            cursor: 'pointer',
-                                            border: color === c ? '4px solid var(--color-text-main)' : '2px solid transparent',
-                                            transition: 'transform 0.2s'
-                                        }}
-                                    />
-                                ))}
+                        <label className="text-body" style={{ display: 'block', marginBottom: '8px' }}>Color Code</label>
+                        <div style={{ display: 'flex', gap: '12px' }}>
+                            {CLASS_COLORS.map((c) => (
+                                <div
+                                    key={c}
+                                    onClick={() => setColor(c)}
+                                    style={{
+                                        width: '40px',
+                                        height: '40px',
+                                        borderRadius: '50%',
+                                        backgroundColor: c,
+                                        cursor: 'pointer',
+                                        border: color === c ? '4px solid var(--color-text-main)' : '2px solid transparent',
+                                        transition: 'transform 0.2s'
+                                    }}
+                                />
+                            ))}
+                        </div>
+                    </div>
+
+                    <button
+                        onClick={() => {
+                            if (!className) return;
+                            const duplicate = state.classes.filter(c => !c.isArchived).find(c =>
+                                c.name.toLowerCase() === className.toLowerCase() && c.id !== editClassId
+                            );
+                            if (duplicate) {
+                                setShowDuplicateModal(true);
+                                return;
+                            }
+                            handleFinish();
+                        }}
+                        className="btn btn-primary"
+                        style={{ width: '100%', marginTop: '24px', maxWidth: '500px', margin: '24px auto', display: 'block' }}
+                        disabled={!className}
+                    >
+                        {editClassId ? 'Save Changes' : 'Finish'}
+                    </button>
+
+                    {editClassId && (
+                        <button
+                            onClick={() => setShowDeleteModal(true)}
+                            className="btn"
+                            style={{ background: 'transparent', border: 'none', color: 'var(--color-error)', width: '100%', maxWidth: '500px', margin: '0 auto', display: 'block', textDecoration: 'underline' }}
+                        >
+                            Delete This Class
+                        </button>
+                    )}
+
+                    {!editClassId && (
+                        <button
+                            onClick={() => router.push('/dashboard')}
+                            className="btn"
+                            style={{ background: 'transparent', border: 'none', color: '#666', width: '100%', maxWidth: '500px', margin: '8px auto', display: 'block', textDecoration: 'underline' }}
+                        >
+                            Cancel
+                        </button>
+                    )}
+
+                    {showDuplicateModal && (
+                        <div style={{
+                            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                            background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100
+                        }} onClick={() => setShowDuplicateModal(false)}>
+                            <div style={{ background: 'white', padding: '24px', borderRadius: '16px', textAlign: 'center', width: '90%', maxWidth: '300px' }} onClick={e => e.stopPropagation()}>
+                                <h3 className="text-h2" style={{ marginTop: 0 }}>Class Exists</h3>
+                                <p className="text-body" style={{ marginBottom: '24px' }}>
+                                    name <strong>{className}</strong> taken.
+                                </p>
+                                <button onClick={() => setShowDuplicateModal(false)} className="btn btn-primary">Okay</button>
                             </div>
                         </div>
-
-                        <button
-                            onClick={() => {
-                                if (!className) return;
-                                const duplicate = state.classes.filter(c => !c.isArchived).find(c =>
-                                    c.name.toLowerCase() === className.toLowerCase() && c.id !== editClassId
-                                );
-                                if (duplicate) {
-                                    setShowDuplicateModal(true);
-                                    return;
-                                }
-                                handleFinish();
-                            }}
-                            className="btn btn-primary"
-                            style={{ width: '100%', marginTop: '24px', maxWidth: '500px', margin: '24px auto', display: 'block' }}
-                            disabled={!className}
-                        >
-                            {editClassId ? 'Save Changes' : 'Finish'}
-                        </button>
-
-                        {editClassId && (
-                            <button
-                                onClick={() => setShowDeleteModal(true)}
-                                className="btn"
-                                style={{ background: 'transparent', border: 'none', color: 'var(--color-error)', width: '100%', maxWidth: '500px', margin: '0 auto', display: 'block', textDecoration: 'underline' }}
-                            >
-                                Delete This Class
-                            </button>
-                        )}
-
-                        {!editClassId && (
-                            <button
-                                onClick={() => router.push('/dashboard')}
-                                className="btn"
-                                style={{ background: 'transparent', border: 'none', color: '#666', width: '100%', maxWidth: '500px', margin: '8px auto', display: 'block', textDecoration: 'underline' }}
-                            >
-                                Cancel
-                            </button>
-                        )}
-
-                        {showDuplicateModal && (
-                            <div style={{
-                                position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-                                background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100
-                            }} onClick={() => setShowDuplicateModal(false)}>
-                                <div style={{ background: 'white', padding: '24px', borderRadius: '16px', textAlign: 'center', width: '90%', maxWidth: '300px' }} onClick={e => e.stopPropagation()}>
-                                    <h3 className="text-h2" style={{ marginTop: 0 }}>Class Exists</h3>
-                                    <p className="text-body" style={{ marginBottom: '24px' }}>
-                                        name <strong>{className}</strong> taken.
-                                    </p>
-                                    <button onClick={() => setShowDuplicateModal(false)} className="btn btn-primary">Okay</button>
-                                </div>
-                            </div>
-                        )}
-                    </>
-                )}
+                    )}
+                </>
+            )}
 
             {/* Delete Modal */}
             <Modal
@@ -550,3 +549,4 @@ export default function Onboarding() {
         </main>
     );
 }
+
